@@ -1,0 +1,17 @@
+Source: sg-compositor
+Section: x11
+Priority: optional
+Maintainer: Stained Glass OS <dev@stained-glass.example>
+Build-Depends: debhelper-compat (= 13), meson, ninja-build, pkgconf,
+ libwlroots-0.18-dev, libwayland-dev, wayland-protocols, libxkbcommon-dev
+Standards-Version: 4.7.0
+Homepage: https://github.com/Stained-Glass-OS/sg-compositor
+Rules-Requires-Root: no
+
+Package: sg-compositor
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, xwayland
+Description: Stained Glass OS Wayland compositor
+ The compositor that hosts a Stained Glass desktop session. Derived from cage
+ 0.2.0 on wlroots 0.18; it will add lock-screen input isolation and
+ session-scoped screen capture and input injection for remote access.

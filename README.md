@@ -1,3 +1,13 @@
+# sg-compositor
+
+The Wayland compositor for [Stained Glass OS](https://github.com/Stained-Glass-OS).
+It is derived from **cage 0.2.0**, which is credited below. See `CLAUDE.md` and
+ADR 0011 in the stained-glass repo for what it adds and why.
+
+---
+
+Original cage README follows.
+
 # Cage: a Wayland kiosk
 
 <img src="https://www.hjdskes.nl/img/projects/cage/cage.svg" alt="Cage's logo" width="150px" align="right">

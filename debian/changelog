@@ -1,0 +1,5 @@
+sg-compositor (0.2.0+sg1) unstable; urgency=medium
+
+  * Initial package: cage 0.2.0 renamed, hosting the Stained Glass session.
+
+ -- Stained Glass OS <dev@stained-glass.example>  Tue, 22 Sep 2026 13:53:48 -0700

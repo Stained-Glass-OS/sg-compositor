@@ -1,5 +1,5 @@
-project('cage', 'c',
-  version: '0.2.0',
+project('sg-compositor', 'c',
+  version: '0.2.0+sg1',
   license: 'MIT',
   meson_version: '>=0.58.1',
   default_options: [
