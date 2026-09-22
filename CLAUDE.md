@@ -34,9 +34,11 @@ when rebasing onto a newer cage or wlroots. Source file names stay cage's
    user's XWayland is sent no input at all — the load-bearing defence of
    ADR 0009, since a frozen keylogger recovers `GetAsyncKeyState` press bits
    on thaw.
-3. **uid-scoped privileged protocols.** Screen capture and virtual input only
-   for the machine session's uid, read from `SO_PEERCRED` via
-   `wl_client_get_credentials`.
+3. **Session-scoped privileged protocols — done** (`make test-privileged`).
+   An ordinary client is not even offered screen capture or input injection;
+   a privileged client — the machine session's account or root, by
+   `SO_PEERCRED` — gets all six and can capture. Another account can neither
+   connect privileged nor UNLOCK, and the refusal is audited.
 
 ## Lock mode and privileged clients (`lock.c`)
 
