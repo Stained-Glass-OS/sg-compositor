@@ -73,6 +73,31 @@ It counts keystroke records rather than matching letters: `wtype` uploads its
 own keymap and Wine decodes injected text as other characters, and "zero new
 records" catches any key leaking, not only the ones a gate thought to check.
 
+## Reserved keys (`make test-sas`)
+
+**Win+L locks, and Ctrl+Alt+Del is the secure attention sequence.** Wine has no
+SAS, and `LockWorkStation()` is a stub. The compositor sees every key before
+any client, so it can reserve these: no client can grab, swallow or — since
+injection is privileged — synthesise them. Both lock today.
+
+`WATCH` on the control socket (lock account or root only) keeps the
+connection open and pushes `locked` / `unlocked`, so the lock service knows to
+put up the lock screen when a key locks the machine.
+
+The gate checks that both lock, that neither the press **nor the release** of
+`l`/`Delete` reaches the client, and — first — that ordinary keys do.
+
+Two things the mutation tests taught:
+
+- **Consuming the reserved key is defence in depth, not load-bearing.**
+  `lock_engage` clears keyboard focus before the key would be delivered, so a
+  build that locks without consuming still leaks nothing, and the gate rightly
+  passes it. A build with no reserved-key handling at all fails on locking and
+  on both leak checks.
+- **A mutant must be shown to build before its verdict counts.** An early
+  mutant tripped `-Werror` and never built; the gate then "failed" against a
+  missing binary, which looked like a catch and was nothing of the sort.
+
 ## Things that will bite you
 
 - **cage does not exit on SIGTERM while its child is stuck.** It stops its

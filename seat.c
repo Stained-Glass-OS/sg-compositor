@@ -281,6 +281,59 @@ handle_keybinding(struct cg_server *server, xkb_keysym_t sym)
 	return true;
 }
 
+/* sg-compositor: keys the compositor reserves, and no client ever sees.
+ *
+ * Win+L locks, as on Windows. Ctrl+Alt+Del is the secure attention sequence:
+ * Wine has none, and on Windows its whole point is that no program can
+ * intercept or fake it. Here that property comes from the compositor seeing
+ * every key before any client does -- a client cannot grab these, cannot
+ * swallow them, and, since input injection is privileged, cannot synthesise
+ * them either. Today both lock; Ctrl+Alt+Del will grow a security screen.
+ *
+ * A consumed press must take its release with it, or the focused client gets
+ * a release for a key it never saw pressed -- and learns a reserved key was
+ * used. */
+#define CG_MAX_CONSUMED 8
+static xkb_keycode_t consumed_keys[CG_MAX_CONSUMED];
+
+static bool
+take_consumed_release(xkb_keycode_t keycode)
+{
+	for (int i = 0; i < CG_MAX_CONSUMED; i++) {
+		if (consumed_keys[i] == keycode) {
+			consumed_keys[i] = 0;
+			return true;
+		}
+	}
+	return false;
+}
+
+static void
+mark_consumed(xkb_keycode_t keycode)
+{
+	for (int i = 0; i < CG_MAX_CONSUMED; i++) {
+		if (!consumed_keys[i]) {
+			consumed_keys[i] = keycode;
+			return;
+		}
+	}
+}
+
+static bool
+handle_reserved_key(struct cg_seat *seat, uint32_t modifiers, const xkb_keysym_t *syms, int nsyms)
+{
+	for (int i = 0; i < nsyms; i++) {
+		bool win_l = (modifiers & WLR_MODIFIER_LOGO) && (syms[i] == XKB_KEY_l || syms[i] == XKB_KEY_L);
+		bool sas = (modifiers & WLR_MODIFIER_CTRL) && (modifiers & WLR_MODIFIER_ALT) &&
+			   (syms[i] == XKB_KEY_Delete || syms[i] == XKB_KEY_KP_Delete);
+		if (win_l || sas) {
+			lock_engage(&seat->server->lock);
+			return true;
+		}
+	}
+	return false;
+}
+
 static void
 handle_key_event(struct wlr_keyboard *keyboard, struct cg_seat *seat, void *data)
 {
@@ -294,7 +347,13 @@ handle_key_event(struct wlr_keyboard *keyboard, struct cg_seat *seat, void *data
 
 	bool handled = false;
 	uint32_t modifiers = wlr_keyboard_get_modifiers(keyboard);
-	if ((modifiers & WLR_MODIFIER_ALT) && event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+	if (event->state == WL_KEYBOARD_KEY_STATE_RELEASED && take_consumed_release(keycode)) {
+		handled = true;
+	} else if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED &&
+		   handle_reserved_key(seat, modifiers, syms, nsyms)) {
+		mark_consumed(keycode);
+		handled = true;
+	} else if ((modifiers & WLR_MODIFIER_ALT) && event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
 		/* If Alt is held down and this button was pressed, we
 		 * attempt to process it as a compositor
 		 * keybinding. */

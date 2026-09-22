@@ -35,6 +35,10 @@ struct cg_lock {
 	 * injection, output and gamma control. */
 	const struct wl_global *restricted[16];
 	int n_restricted;
+
+	/* WATCH connections: told "locked" / "unlocked" as it happens, so the
+	 * lock service can put up the lock screen when Win+L is pressed. */
+	struct wl_list watchers; /* struct cg_watcher::link */
 };
 
 bool lock_init(struct cg_lock *lock, struct cg_server *server, const char *lock_socket,

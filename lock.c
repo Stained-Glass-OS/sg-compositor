@@ -49,6 +49,43 @@
  * client is exactly what an administrator needs to see. */
 #define AUDIT(...) wlr_log(WLR_ERROR, "audit: " __VA_ARGS__)
 
+struct cg_watcher {
+	struct wl_list link;
+	int fd;
+	struct wl_event_source *source;
+};
+
+static void
+watcher_free(struct cg_watcher *w)
+{
+	wl_list_remove(&w->link);
+	wl_event_source_remove(w->source);
+	close(w->fd);
+	free(w);
+}
+
+/* A watcher's only traffic is what we send; anything readable means it hung
+ * up or misbehaved, and either way it is done. */
+static int
+handle_watcher_event(int fd, uint32_t mask, void *data)
+{
+	(void) fd;
+	(void) mask;
+	watcher_free(data);
+	return 0;
+}
+
+static void
+notify_watchers(struct cg_lock *lock, const char *event)
+{
+	struct cg_watcher *w, *tmp;
+	wl_list_for_each_safe (w, tmp, &lock->watchers, link) {
+		if (write(w->fd, event, strlen(event)) < 0) {
+			watcher_free(w);
+		}
+	}
+}
+
 struct cg_privileged_client {
 	struct wl_list link;
 	struct wl_client *client;
@@ -200,6 +237,22 @@ handle_control_connection(int fd, uint32_t mask, void *data)
 			AUDIT("refused UNLOCK from uid %d", (int) uid);
 			reply = "ERR not permitted\n";
 		}
+	} else if (!strcmp(buf, "WATCH")) {
+		struct cg_watcher *w;
+		if (!uid_may_unlock(lock, uid) || !(w = calloc(1, sizeof(*w)))) {
+			reply = "ERR not permitted\n";
+		} else {
+			fcntl(client_fd, F_SETFL, fcntl(client_fd, F_GETFL) | O_NONBLOCK);
+			w->fd = client_fd;
+			w->source = wl_event_loop_add_fd(wl_display_get_event_loop(lock->server->wl_display), client_fd,
+							 WL_EVENT_READABLE, handle_watcher_event, w);
+			wl_list_insert(&lock->watchers, &w->link);
+			reply = lock->locked ? "OK locked\n" : "OK unlocked\n";
+			if (write(client_fd, reply, strlen(reply)) < 0) {
+				watcher_free(w);
+			}
+			return 0; /* the connection stays open */
+		}
 	} else if (!strcmp(buf, "STATUS")) {
 		reply = lock->locked ? "OK locked\n" : "OK unlocked\n";
 	} else {
@@ -265,6 +318,7 @@ lock_engage(struct cg_lock *lock)
 	}
 	lock->locked = true;
 	AUDIT("locked");
+	notify_watchers(lock, "locked\n");
 
 	wl_list_for_each (view, &server->views, link) {
 		bool privileged = lock_view_is_privileged(lock, view);
@@ -295,6 +349,7 @@ lock_release(struct cg_lock *lock)
 	}
 	lock->locked = false;
 	AUDIT("unlocked");
+	notify_watchers(lock, "unlocked\n");
 
 	wlr_seat_keyboard_notify_clear_focus(server->seat->seat);
 	wl_list_for_each (view, &server->views, link) {
@@ -359,6 +414,7 @@ lock_init(struct cg_lock *lock, struct cg_server *server, const char *lock_socke
 	lock->server = server;
 	lock->lock_fd = lock->control_fd = -1;
 	wl_list_init(&lock->privileged);
+	wl_list_init(&lock->watchers);
 	wl_display_set_global_filter(server->wl_display, global_filter, lock);
 
 	if (lock_uid) {

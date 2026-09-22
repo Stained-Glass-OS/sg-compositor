@@ -2,7 +2,7 @@
 BUILD ?= build
 SG_SESSION ?= ../sg-session
 
-.PHONY: all build test test-session test-lock test-privileged clean deb install
+.PHONY: all build test test-session test-lock test-privileged test-sas clean deb install
 
 all: build
 
@@ -18,7 +18,7 @@ install: build
 # The gate is sg-session's own session gate, run with this compositor hosting
 # the session instead of cage. Milestone 1 of ADR 0011 is exactly "that still
 # passes", so the gate is the same one, not a new one.
-test: test-session test-lock test-privileged
+test: test-session test-lock test-privileged test-sas
 
 test-session: build
 	@[ -d "$(SG_SESSION)" ] || { echo "sg-session checkout not found at $(SG_SESSION)"; exit 2; }
@@ -39,3 +39,7 @@ clean:
 # Session-scoped privileged protocols (milestone 3).
 test-privileged: build
 	@sh test/privileged-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc
+
+# Reserved keys: Win+L and Ctrl+Alt+Del.
+test-sas: build
+	@sh test/sas-gate.sh; rc=$$?; [ $$rc -eq 77 ] \&\& exit 0 || exit $$rc
