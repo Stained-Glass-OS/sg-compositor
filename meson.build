@@ -111,6 +111,7 @@ if scdoc.found()
 endif
 
 cage_sources = [
+  'lock.c',
   'cage.c',
   'idle_inhibit_v1.c',
   'output.c',

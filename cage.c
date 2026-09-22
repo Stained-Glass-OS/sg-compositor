@@ -232,6 +232,9 @@ usage(FILE *file, const char *cage)
 		" -m last Use only the last connected output\n"
 		" -s\t Allow VT switching\n"
 		" -v\t Show the version number and exit\n"
+		" -L path Privileged Wayland socket, for the lock screen and remote access\n"
+		" -C path Control socket accepting LOCK, UNLOCK and STATUS\n"
+		" -U uid  Account that may unlock and connect privileged (plus root)\n"
 		"\n"
 		" Use -- when you want to pass arguments to APPLICATION\n",
 		cage);
@@ -241,7 +244,7 @@ static bool
 parse_args(struct cg_server *server, int argc, char *argv[])
 {
 	int c;
-	while ((c = getopt(argc, argv, "dhm:sv")) != -1) {
+	while ((c = getopt(argc, argv, "dhm:svL:C:U:")) != -1) {
 		switch (c) {
 		case 'd':
 			server->xdg_decoration = true;
@@ -258,6 +261,15 @@ parse_args(struct cg_server *server, int argc, char *argv[])
 			break;
 		case 's':
 			server->allow_vt_switch = true;
+			break;
+		case 'L':
+			server->lock_socket = optarg;
+			break;
+		case 'C':
+			server->control_socket = optarg;
+			break;
+		case 'U':
+			server->lock_uid = optarg;
 			break;
 		case 'v':
 			fprintf(stdout, "Cage version " CAGE_VERSION "\n");
@@ -303,6 +315,13 @@ main(int argc, char *argv[])
 	server.wl_display = wl_display_create();
 	if (!server.wl_display) {
 		wlr_log(WLR_ERROR, "Cannot allocate a Wayland display");
+		return 1;
+	}
+
+	/* sg-compositor: before any global is created or any client can connect,
+	 * so the global filter governs every bind. */
+	if (!lock_init(&server.lock, &server, server.lock_socket, server.control_socket, server.lock_uid)) {
+		wlr_log(WLR_ERROR, "Cannot set up the lock and privileged sockets");
 		return 1;
 	}
 
@@ -462,13 +481,17 @@ main(int argc, char *argv[])
 		goto end;
 	}
 
-	if (!wlr_export_dmabuf_manager_v1_create(server.wl_display)) {
+	struct wlr_export_dmabuf_manager_v1 *export_dmabuf = wlr_export_dmabuf_manager_v1_create(server.wl_display);
+	lock_restrict_global(&server.lock, export_dmabuf ? export_dmabuf->global : NULL);
+	if (!export_dmabuf) {
 		wlr_log(WLR_ERROR, "Unable to create the export DMABUF manager");
 		ret = 1;
 		goto end;
 	}
 
-	if (!wlr_screencopy_manager_v1_create(server.wl_display)) {
+	struct wlr_screencopy_manager_v1 *screencopy = wlr_screencopy_manager_v1_create(server.wl_display);
+	lock_restrict_global(&server.lock, screencopy ? screencopy->global : NULL);
+	if (!screencopy) {
 		wlr_log(WLR_ERROR, "Unable to create the screencopy manager");
 		ret = 1;
 		goto end;
@@ -492,12 +515,15 @@ main(int argc, char *argv[])
 		ret = 1;
 		goto end;
 	}
+	lock_restrict_global(&server.lock, server.output_manager_v1->global);
 	server.output_manager_apply.notify = handle_output_manager_apply;
 	wl_signal_add(&server.output_manager_v1->events.apply, &server.output_manager_apply);
 	server.output_manager_test.notify = handle_output_manager_test;
 	wl_signal_add(&server.output_manager_v1->events.test, &server.output_manager_test);
 
-	if (!wlr_gamma_control_manager_v1_create(server.wl_display)) {
+	struct wlr_gamma_control_manager_v1 *gamma = wlr_gamma_control_manager_v1_create(server.wl_display);
+	lock_restrict_global(&server.lock, gamma ? gamma->global : NULL);
+	if (!gamma) {
 		wlr_log(WLR_ERROR, "Unable to create the gamma control manager");
 		ret = 1;
 		goto end;
@@ -510,6 +536,7 @@ main(int argc, char *argv[])
 		ret = 1;
 		goto end;
 	}
+	lock_restrict_global(&server.lock, virtual_keyboard->global);
 	wl_signal_add(&virtual_keyboard->events.new_virtual_keyboard, &server.new_virtual_keyboard);
 
 	struct wlr_virtual_pointer_manager_v1 *virtual_pointer =
@@ -519,6 +546,7 @@ main(int argc, char *argv[])
 		ret = 1;
 		goto end;
 	}
+	lock_restrict_global(&server.lock, virtual_pointer->global);
 	wl_signal_add(&virtual_pointer->events.new_virtual_pointer, &server.new_virtual_pointer);
 
 	server.relative_pointer_manager = wlr_relative_pointer_manager_v1_create(server.wl_display);

@@ -84,6 +84,11 @@ desktop_view_at(struct cg_server *server, double lx, double ly, struct wlr_surfa
 	}
 
 	assert(node != NULL);
+	/* sg-compositor: a view that may not be seen right now is not under
+	 * the cursor either, so it receives no pointer, touch or tablet input. */
+	if (!lock_view_allowed(&server->lock, node->data)) {
+		return NULL;
+	}
 	return node->data;
 }
 
@@ -916,6 +921,12 @@ seat_set_focus(struct cg_seat *seat, struct cg_view *view)
 	struct cg_view *prev_view = seat_get_focus(seat);
 
 	if (!view || prev_view == view) {
+		return;
+	}
+
+	/* sg-compositor: while locked, keyboard focus -- and so every key
+	 * event -- can only go to a privileged view. */
+	if (!lock_view_allowed(&server->lock, view)) {
 		return;
 	}
 

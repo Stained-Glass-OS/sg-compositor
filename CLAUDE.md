@@ -29,13 +29,47 @@ when rebasing onto a newer cage or wlroots. Source file names stay cage's
 
 1. **Replace cage — done.** The session gate passes on sg-compositor exactly
    as on cage: desktop, taskbar, 32- and 64-bit Notepad.
-2. **Lock mode with input isolation.** While locked, one lock client gets all
-   input and the user's XWayland gets none. This is the load-bearing defence of
-   ADR 0009 — a frozen keylogger recovers `GetAsyncKeyState` press bits on
-   thaw, so the events must never arrive at all.
+2. **Lock mode with input isolation — done** (`lock.c`, `make test-lock`).
+   While locked, only privileged clients are visible or focusable, so the
+   user's XWayland is sent no input at all — the load-bearing defence of
+   ADR 0009, since a frozen keylogger recovers `GetAsyncKeyState` press bits
+   on thaw.
 3. **uid-scoped privileged protocols.** Screen capture and virtual input only
    for the machine session's uid, read from `SO_PEERCRED` via
    `wl_client_get_credentials`.
+
+## Lock mode and privileged clients (`lock.c`)
+
+- `-L path` is the **privileged Wayland socket**: the lock screen and remote
+  access connect here. `-C path` is a **control socket** taking `LOCK`,
+  `UNLOCK`, `STATUS`. `-U uid` is the machine session's account.
+- **Authority is `SO_PEERCRED`, never file permissions.** The compositor runs
+  as the logged-in user, so that user's programs can reach any socket it
+  creates. Anyone in the session may `LOCK`; only `-U`'s uid or root may
+  `UNLOCK` or connect privileged. Verified across real accounts: `nobody` gets
+  `ERR not permitted` and a connection reset.
+- **cage offered screen capture and input injection to every client**:
+  `screencopy`, `export-dmabuf`, `virtual-keyboard`, `virtual-pointer`, plus
+  output and gamma control. Any program could photograph or type into a lock
+  screen. A global filter now hides all six from everything but privileged
+  clients; Wine uses XWayland's RandR, not these, so nothing ordinary breaks.
+- Three guards do the isolation, and each is load-bearing: `desktop_view_at`
+  (all pointer, touch and tablet), `seat_set_focus` (keyboard) and view
+  mapping (a window opened during a lock stays hidden).
+- Security events log as `audit:` at ERROR, because a release build logs
+  nothing below it and a refused unlock must be visible.
+
+**`make test-lock`** runs a keylogger in the user session and injects keys the
+way remote access will — `virtual-keyboard` over the privileged socket, through
+the compositor's own routing. Unlocked, the keylogger must see them (teeth);
+locked, the lock screen must see them *and* the keylogger must gain zero
+records; and a key-logging window the user session opens *during* the lock
+must get nothing. With the focus guard removed, that window stole every key
+and the lock screen got none — so the gate is known to catch it.
+
+It counts keystroke records rather than matching letters: `wtype` uploads its
+own keymap and Wine decodes injected text as other characters, and "zero new
+records" catches any key leaking, not only the ones a gate thought to check.
 
 ## Things that will bite you
 

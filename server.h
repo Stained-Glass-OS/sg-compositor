@@ -2,6 +2,7 @@
 #define CG_SERVER_H
 
 #include "config.h"
+#include "lock.h"
 
 #include <wayland-server-core.h>
 #include <wlr/types/wlr_idle_inhibit_v1.h>
@@ -63,6 +64,12 @@ struct cg_server {
 	bool allow_vt_switch;
 	bool return_app_code;
 	bool terminated;
+
+	/* sg-compositor: lock mode and privileged clients, see lock.c */
+	struct cg_lock lock;
+	const char *lock_socket;
+	const char *control_socket;
+	const char *lock_uid;
 };
 
 void server_terminate(struct cg_server *server);

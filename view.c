@@ -144,6 +144,8 @@ view_map(struct cg_view *view, struct wlr_surface *surface)
 	}
 
 	wl_list_insert(&view->server->views, &view->link);
+	/* sg-compositor: a window opened during a lock stays hidden. */
+	lock_view_mapped(&view->server->lock, view);
 	seat_set_focus(view->server->seat, view);
 }
 
