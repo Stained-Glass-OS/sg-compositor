@@ -107,6 +107,31 @@ with no modes of their own take it. The RDP daemon is a privileged client: it
 captures with screencopy and types and points with the virtual keyboard and
 pointer, the same capabilities `make test-privileged` guards.
 
+### Taking over the console session (E1b)
+
+As on Windows, a Remote Desktop login for a user signed in at the console
+takes *that* session. `REMOTE` on the control socket (lock account or root
+only, because it unlocks) makes a new output on a standby headless backend,
+at the console's size so the Wine desktop keeps its size. It puts every
+non-privileged view on that output and privileged ones (the lock screen) on
+the console. The console then shows nothing and ignores its own keyboard,
+pointer and touch. Only virtual devices, the RDP daemon's, reach the session.
+The reply is `OK remote <output> <W>x<H>`.
+
+- **The RDP daemon passes its connection with `REMOTE`** (SCM_RIGHTS, one end
+  of a socketpair): it becomes a privileged client, and when it closes the
+  session goes back to the console, **locked**. The daemon captures the
+  newest output.
+- **Ctrl+Alt+Del at the console** gives the session back (locked), and the
+  remote connection is destroyed at once: its capture and its input end with
+  the takeover.
+- `LOCAL` gives it back too. A secure prompt (SECURE) refuses `REMOTE`.
+- `view_center` used to ignore the output's offset, which never mattered with
+  one output.
+- Gate: sg-session's `make test-rdp-stream` (console takeover section). The
+  physical-input filter is not in a gate, because headless has no physical
+  devices.
+
 ## Things that will bite you
 
 - **cage does not exit on SIGTERM while its child is stuck.** It stops its

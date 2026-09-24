@@ -66,6 +66,11 @@ void lock_view_mapped(struct cg_lock *lock, struct cg_view *view);
 void lock_restrict_global(struct cg_lock *lock, const struct wl_global *global);
 
 void lock_engage(struct cg_lock *lock);
+
+/* Remote Desktop takes the session (REMOTE) or gives it back (LOCAL, or
+ * Ctrl+Alt+Del at the console). remote_attach writes the reply line. */
+bool remote_attach(struct cg_server *server, char *reply, size_t len);
+void remote_detach(struct cg_server *server, const char *why);
 void lock_release(struct cg_lock *lock);
 bool lock_secure_engage(struct cg_lock *lock);
 void lock_secure_release(struct cg_lock *lock);

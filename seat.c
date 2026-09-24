@@ -228,6 +228,24 @@ handle_new_pointer(struct cg_seat *seat, struct wlr_pointer *wlr_pointer)
 	map_input_device_to_output(seat, &wlr_pointer->base, wlr_pointer->output_name);
 }
 
+/* While Remote Desktop has the session, the console's own devices are
+ * ignored: only a privileged client's virtual devices reach the session. */
+static bool
+console_input_ignored(struct cg_seat *seat, struct wlr_pointer *wlr_pointer)
+{
+	struct cg_pointer *pointer;
+
+	if (!seat->server->remote) {
+		return false;
+	}
+	wl_list_for_each (pointer, &seat->pointers, link) {
+		if (pointer->pointer == wlr_pointer) {
+			return !pointer->is_virtual;
+		}
+	}
+	return true;
+}
+
 static void
 handle_virtual_pointer(struct wl_listener *listener, void *data)
 {
@@ -246,6 +264,12 @@ handle_virtual_pointer(struct wl_listener *listener, void *data)
 	}
 	/* TODO: event->suggested_seat should be checked if we handle multiple seats */
 	handle_new_pointer(seat, wlr_pointer);
+	struct cg_pointer *cg_pointer;
+	wl_list_for_each (cg_pointer, &seat->pointers, link) {
+		if (cg_pointer->pointer == wlr_pointer) {
+			cg_pointer->is_virtual = true;
+		}
+	}
 	update_capabilities(seat);
 }
 
@@ -335,7 +359,7 @@ handle_reserved_key(struct cg_seat *seat, uint32_t modifiers, const xkb_keysym_t
 }
 
 static void
-handle_key_event(struct wlr_keyboard *keyboard, struct cg_seat *seat, void *data)
+handle_key_event(struct wlr_keyboard *keyboard, struct cg_seat *seat, void *data, bool is_virtual)
 {
 	struct wlr_keyboard_key_event *event = data;
 
@@ -344,6 +368,22 @@ handle_key_event(struct wlr_keyboard *keyboard, struct cg_seat *seat, void *data
 
 	const xkb_keysym_t *syms;
 	int nsyms = xkb_state_key_get_syms(keyboard->xkb_state, keycode, &syms);
+
+	/* Remote Desktop has the session: the console's keyboard reaches
+	 * nothing, except Ctrl+Alt+Del, which gives the session back to the
+	 * console -- locked, so whoever is there must still sign in. */
+	if (seat->server->remote && !is_virtual) {
+		uint32_t mods = wlr_keyboard_get_modifiers(keyboard);
+		for (int i = 0; event->state == WL_KEYBOARD_KEY_STATE_PRESSED && i < nsyms; i++) {
+			if ((mods & WLR_MODIFIER_CTRL) && (mods & WLR_MODIFIER_ALT) &&
+			    (syms[i] == XKB_KEY_Delete || syms[i] == XKB_KEY_KP_Delete)) {
+				remote_detach(seat->server, "Ctrl+Alt+Del at the console");
+				mark_consumed(keycode);
+				break;
+			}
+		}
+		return;
+	}
 
 	bool handled = false;
 	uint32_t modifiers = wlr_keyboard_get_modifiers(keyboard);
@@ -375,7 +415,7 @@ static void
 handle_keyboard_group_key(struct wl_listener *listener, void *data)
 {
 	struct cg_keyboard_group *cg_group = wl_container_of(listener, cg_group, key);
-	handle_key_event(&cg_group->wlr_group->keyboard, cg_group->seat, data);
+	handle_key_event(&cg_group->wlr_group->keyboard, cg_group->seat, data, cg_group->is_virtual);
 }
 
 static void
@@ -555,6 +595,9 @@ static void
 handle_touch_down(struct wl_listener *listener, void *data)
 {
 	struct cg_seat *seat = wl_container_of(listener, seat, touch_down);
+	if (seat->server->remote) {
+		return;
+	}
 	struct wlr_touch_down_event *event = data;
 
 	double lx, ly;
@@ -583,6 +626,9 @@ static void
 handle_touch_up(struct wl_listener *listener, void *data)
 {
 	struct cg_seat *seat = wl_container_of(listener, seat, touch_up);
+	if (seat->server->remote) {
+		return;
+	}
 	struct wlr_touch_up_event *event = data;
 
 	if (!wlr_seat_touch_get_point(seat->seat, event->touch_id)) {
@@ -602,6 +648,9 @@ static void
 handle_touch_motion(struct wl_listener *listener, void *data)
 {
 	struct cg_seat *seat = wl_container_of(listener, seat, touch_motion);
+	if (seat->server->remote) {
+		return;
+	}
 	struct wlr_touch_motion_event *event = data;
 
 	if (!wlr_seat_touch_get_point(seat->seat, event->touch_id)) {
@@ -654,6 +703,10 @@ handle_cursor_axis(struct wl_listener *listener, void *data)
 	struct cg_seat *seat = wl_container_of(listener, seat, cursor_axis);
 	struct wlr_pointer_axis_event *event = data;
 
+	if (console_input_ignored(seat, event->pointer)) {
+		return;
+	}
+
 	wlr_seat_pointer_notify_axis(seat->seat, event->time_msec, event->orientation, event->delta,
 				     event->delta_discrete, event->source, event->relative_direction);
 	wlr_idle_notifier_v1_notify_activity(seat->server->idle, seat->seat);
@@ -664,6 +717,10 @@ handle_cursor_button(struct wl_listener *listener, void *data)
 {
 	struct cg_seat *seat = wl_container_of(listener, seat, cursor_button);
 	struct wlr_pointer_button_event *event = data;
+
+	if (console_input_ignored(seat, event->pointer)) {
+		return;
+	}
 
 	wlr_seat_pointer_notify_button(seat->seat, event->time_msec, event->button, event->state);
 	press_cursor_button(seat, &event->pointer->base, event->time_msec, event->button, event->state, seat->cursor->x,
@@ -707,6 +764,10 @@ handle_cursor_motion_absolute(struct wl_listener *listener, void *data)
 	struct cg_seat *seat = wl_container_of(listener, seat, cursor_motion_absolute);
 	struct wlr_pointer_motion_absolute_event *event = data;
 
+	if (console_input_ignored(seat, event->pointer)) {
+		return;
+	}
+
 	double lx, ly;
 	wlr_cursor_absolute_to_layout_coords(seat->cursor, &event->pointer->base, event->x, event->y, &lx, &ly);
 
@@ -723,6 +784,10 @@ handle_cursor_motion_relative(struct wl_listener *listener, void *data)
 {
 	struct cg_seat *seat = wl_container_of(listener, seat, cursor_motion_relative);
 	struct wlr_pointer_motion_event *event = data;
+
+	if (console_input_ignored(seat, event->pointer)) {
+		return;
+	}
 
 	wlr_cursor_move(seat->cursor, &event->pointer->base, event->delta_x, event->delta_y);
 	process_cursor_motion(seat, event->time_msec, event->delta_x, event->delta_y, event->unaccel_dx,

@@ -70,6 +70,17 @@ struct cg_server {
 	const char *lock_socket;
 	const char *control_socket;
 	const char *lock_uid;
+
+	/* sg-compositor: Remote Desktop takes over this (console) session -- the
+	 * user's windows move to an output of their own that the RDP daemon
+	 * captures, and the console goes dark and deaf. See remote_attach(). */
+	struct wlr_backend *remote_backend; /* headless, part of the multi backend */
+	struct wlr_output *remote_output;
+	bool remote;
+	/* The RDP daemon's connection, handed over with REMOTE: when it closes,
+	 * the session goes back to the console. */
+	struct wl_client *remote_client;
+	struct wl_listener remote_client_destroy;
 };
 
 void server_terminate(struct cg_server *server);

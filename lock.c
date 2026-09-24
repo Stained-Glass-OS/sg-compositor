@@ -36,10 +36,14 @@
 #include <sys/un.h>
 #include <unistd.h>
 #include <wayland-server-core.h>
+#include <wlr/backend/headless.h>
+#include <wlr/types/wlr_output_layout.h>
 #include <wlr/types/wlr_scene.h>
+#include <wlr/util/box.h>
 #include <wlr/types/wlr_seat.h>
 #include <wlr/util/log.h>
 
+#include "output.h"
 #include "seat.h"
 #include "server.h"
 #include "view.h"
@@ -191,13 +195,133 @@ handle_lock_connection(int fd, uint32_t mask, void *data)
 	return 0;
 }
 
-/* One command per connection: LOCK, UNLOCK, SECURE, RELEASE, WATCH or STATUS. */
+/* Remote Desktop takes over the console session, as on Windows: the user's
+ * windows move to an output of their own, at the console's size so the
+ * desktop keeps its size, which the RDP daemon captures and feeds its
+ * virtual keyboard and pointer to; the console shows nothing and takes no
+ * input but Ctrl+Alt+Del, which gives the session back to the console
+ * (remote_detach), locked. Only the lock account or root may ask: it
+ * unlocks the session, so the RDP daemon's root monitor asks after PAM
+ * accepted that user's password. */
+bool
+remote_attach(struct cg_server *server, char *reply, size_t len)
+{
+	struct cg_output *output;
+	struct wlr_box box = {0};
+
+	if (!server->remote_backend || server->lock.secure) {
+		return false;
+	}
+	if (!server->remote) {
+		wl_list_for_each (output, &server->outputs, link) {
+			if (!output->wlr_output->enabled) {
+				continue;
+			}
+			wlr_output_layout_get_box(server->output_layout, output->wlr_output, &box);
+			if (!wlr_box_empty(&box)) {
+				break;
+			}
+		}
+		if (wlr_box_empty(&box)) {
+			box.width = 1280;
+			box.height = 720;
+		}
+		struct wlr_output *wlr_output = wlr_headless_add_output(server->remote_backend, box.width, box.height);
+		if (!wlr_output) {
+			return false;
+		}
+		server->remote_output = wlr_output;
+		server->remote = true;
+		AUDIT("remote desktop took the session (%s, %dx%d)", wlr_output->name, box.width, box.height);
+		lock_release(&server->lock);
+		view_position_all(server);
+		wlr_seat_pointer_notify_clear_focus(server->seat->seat);
+	}
+	snprintf(reply, len, "OK remote %s %dx%d\n", server->remote_output->name, server->remote_output->width,
+		 server->remote_output->height);
+	return true;
+}
+
+void
+remote_detach(struct cg_server *server, const char *why)
+{
+	struct wlr_output *wlr_output = server->remote_output;
+	struct wl_client *client = server->remote_client;
+
+	if (!server->remote) {
+		return;
+	}
+	server->remote = false;
+	server->remote_output = NULL;
+	if (client) {
+		wl_list_remove(&server->remote_client_destroy.link);
+		server->remote_client = NULL;
+	}
+	AUDIT("remote desktop gave the session back (%s)", why);
+	/* Locked before the windows come back to the console. */
+	lock_engage(&server->lock);
+	if (wlr_output) {
+		wlr_output_destroy(wlr_output);
+	}
+	view_position_all(server);
+	/* Taken back at the console: the remote connection loses the session,
+	 * its capture and its input, at once. */
+	if (client) {
+		wl_client_destroy(client);
+	}
+}
+
+static void
+handle_remote_client_destroy(struct wl_listener *listener, void *data)
+{
+	struct cg_server *server = wl_container_of(listener, server, remote_client_destroy);
+	(void) data;
+	wl_list_remove(&server->remote_client_destroy.link);
+	server->remote_client = NULL;
+	remote_detach(server, "remote desktop disconnected");
+}
+
+/* The RDP daemon's end of a socketpair, passed with REMOTE: a privileged
+ * client like one on the privileged socket, whose going away ends the
+ * remote session. */
+static bool
+adopt_remote_client(struct cg_lock *lock, int fd)
+{
+	struct cg_server *server = lock->server;
+	struct cg_privileged_client *pc;
+	struct wl_client *client;
+
+	if (server->remote_client) {
+		close(fd);
+		return false; /* one remote connection at a time */
+	}
+	if (!(client = wl_client_create(server->wl_display, fd))) {
+		close(fd);
+		return false;
+	}
+	if (!(pc = calloc(1, sizeof(*pc)))) {
+		wl_client_destroy(client);
+		return false;
+	}
+	pc->client = client;
+	pc->destroy.notify = privileged_destroy;
+	wl_client_add_destroy_listener(client, &pc->destroy);
+	wl_list_insert(&lock->privileged, &pc->link);
+	server->remote_client = client;
+	server->remote_client_destroy.notify = handle_remote_client_destroy;
+	wl_client_add_destroy_listener(client, &server->remote_client_destroy);
+	return true;
+}
+
+/* One command per connection: LOCK, UNLOCK, SECURE, RELEASE, WATCH, STATUS,
+ * REMOTE (optionally with the remote connection's fd) or LOCAL. */
 static int
 handle_control_connection(int fd, uint32_t mask, void *data)
 {
 	struct cg_lock *lock = data;
-	char buf[64] = {0};
+	char buf[64] = {0}, remote_reply[128];
 	const char *reply;
+	int passed_fd = -1;
 	int client_fd;
 	uid_t uid = (uid_t) -1; /* reported as -1 if the kernel cannot say */
 	ssize_t n;
@@ -216,7 +340,20 @@ handle_control_connection(int fd, uint32_t mask, void *data)
 		close(client_fd);
 		return 0;
 	}
-	n = read(client_fd, buf, sizeof(buf) - 1);
+	{
+		/* REMOTE may come with a descriptor (SCM_RIGHTS). */
+		char cbuf[CMSG_SPACE(sizeof(int))];
+		struct iovec iov = {.iov_base = buf, .iov_len = sizeof(buf) - 1};
+		struct msghdr mh = {.msg_iov = &iov, .msg_iovlen = 1, .msg_control = cbuf, .msg_controllen = sizeof(cbuf)};
+		struct cmsghdr *cm;
+		n = recvmsg(client_fd, &mh, MSG_CMSG_CLOEXEC);
+		for (cm = n > 0 ? CMSG_FIRSTHDR(&mh) : NULL; cm; cm = CMSG_NXTHDR(&mh, cm)) {
+			if (cm->cmsg_level == SOL_SOCKET && cm->cmsg_type == SCM_RIGHTS &&
+			    cm->cmsg_len == CMSG_LEN(sizeof(int))) {
+				memcpy(&passed_fd, CMSG_DATA(cm), sizeof(int));
+			}
+		}
+	}
 	if (n > 0 && buf[n - 1] == '\n') {
 		buf[n - 1] = 0;
 	}
@@ -270,10 +407,37 @@ handle_control_connection(int fd, uint32_t mask, void *data)
 			lock_secure_release(lock);
 			reply = lock->locked ? "OK locked\n" : "OK unlocked\n";
 		}
+	} else if (!strcmp(buf, "REMOTE")) {
+		if (!uid_may_unlock(lock, uid)) {
+			AUDIT("refused REMOTE from uid %d", (int) uid);
+			reply = "ERR not permitted\n";
+		} else if (passed_fd >= 0 && !adopt_remote_client(lock, passed_fd)) {
+			passed_fd = -1;
+			reply = "ERR busy\n";
+		} else if (remote_attach(lock->server, remote_reply, sizeof(remote_reply))) {
+			passed_fd = -1; /* the compositor's now */
+			reply = remote_reply;
+		} else {
+			reply = "ERR cannot\n";
+		}
+	} else if (!strcmp(buf, "LOCAL")) {
+		if (!uid_may_unlock(lock, uid)) {
+			AUDIT("refused LOCAL from uid %d", (int) uid);
+			reply = "ERR not permitted\n";
+		} else {
+			remote_detach(lock->server, "remote desktop disconnected");
+			reply = lock->locked ? "OK locked\n" : "OK unlocked\n";
+		}
 	} else if (!strcmp(buf, "STATUS")) {
 		reply = lock->secure ? "OK secure\n" : lock->locked ? "OK locked\n" : "OK unlocked\n";
 	} else {
 		reply = "ERR unknown command\n";
+	}
+	if (passed_fd >= 0 && lock->server->remote_client && !lock->server->remote) {
+		/* adopted, but the session could not be moved: let it go */
+		wl_client_destroy(lock->server->remote_client);
+	} else if (passed_fd >= 0 && !lock->server->remote_client) {
+		close(passed_fd);
 	}
 	if (send(client_fd, reply, strlen(reply), MSG_NOSIGNAL) < 0) {
 		/* nothing useful to do */

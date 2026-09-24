@@ -15,6 +15,9 @@ set -u
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 COMP="${SG_COMPOSITOR_BIN:-$HERE/build/sg-compositor}"
 SG_SESSION="${SG_SESSION:-$HERE/../sg-session}"
+# Absolute: it becomes WINEPREFIX, and Wine cannot chdir to a relative one
+# from the session's own working directory ("make test-lock" passes ../sg-session).
+SG_SESSION=$(CDPATH='' cd -- "$SG_SESSION" 2>/dev/null && pwd || printf '%s' "$SG_SESSION")
 ADV="${SG_ADVERSARY:-$SG_SESSION/build/sg-keylog-adversary.exe}"
 PFX="${SG_PREFIX:-$SG_SESSION/test/tmp/state/prefix}"
 WINE_DIR="${SG_WINE_DIR:-/opt/wine-sg}"

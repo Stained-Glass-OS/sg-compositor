@@ -15,6 +15,7 @@
 #include <wayland-server-core.h>
 #include <wlr/types/wlr_output.h>
 #include <wlr/types/wlr_scene.h>
+#include <wlr/util/box.h>
 
 #include "output.h"
 #include "seat.h"
@@ -80,19 +81,49 @@ view_center(struct cg_view *view, struct wlr_box *layout_box)
 	int width, height;
 	view->impl->get_geometry(view, &width, &height);
 
-	view->lx = (layout_box->width - width) / 2;
-	view->ly = (layout_box->height - height) / 2;
+	view->lx = layout_box->x + (layout_box->width - width) / 2;
+	view->ly = layout_box->y + (layout_box->height - height) / 2;
 
 	if (view->scene_tree) {
 		wlr_scene_node_set_position(&view->scene_tree->node, view->lx, view->ly);
 	}
 }
 
+/* Where a view lives: the whole layout, or -- while Remote Desktop has the
+ * session -- the remote output for the user's windows and the console for
+ * privileged ones (the lock screen). */
+static void
+view_layout_box(struct cg_view *view, struct wlr_box *box)
+{
+	struct cg_server *server = view->server;
+
+	if (server->remote && server->remote_output) {
+		if (!lock_view_is_privileged(&server->lock, view)) {
+			wlr_output_layout_get_box(server->output_layout, server->remote_output, box);
+			if (!wlr_box_empty(box)) {
+				return;
+			}
+		} else {
+			struct cg_output *output;
+			wl_list_for_each (output, &server->outputs, link) {
+				if (output->wlr_output == server->remote_output) {
+					continue;
+				}
+				wlr_output_layout_get_box(server->output_layout, output->wlr_output, box);
+				if (!wlr_box_empty(box)) {
+					return;
+				}
+			}
+		}
+	}
+	wlr_output_layout_get_box(server->output_layout, NULL, box);
+}
+
 void
 view_position(struct cg_view *view)
 {
 	struct wlr_box layout_box;
-	wlr_output_layout_get_box(view->server->output_layout, NULL, &layout_box);
+	view_layout_box(view, &layout_box);
 
 	if (view_is_primary(view) || view_extends_output_layout(view, &layout_box)) {
 		view_maximize(view, &layout_box);

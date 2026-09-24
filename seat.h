@@ -63,6 +63,7 @@ struct cg_pointer {
 	struct wl_list link; // seat::pointers
 	struct cg_seat *seat;
 	struct wlr_pointer *pointer;
+	bool is_virtual; /* a privileged client's (remote access), not hardware */
 
 	struct wl_listener destroy;
 };
