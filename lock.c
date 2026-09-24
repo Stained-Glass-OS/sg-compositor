@@ -191,7 +191,7 @@ handle_lock_connection(int fd, uint32_t mask, void *data)
 	return 0;
 }
 
-/* One command per connection: LOCK, UNLOCK or STATUS. */
+/* One command per connection: LOCK, UNLOCK, SECURE, RELEASE, WATCH or STATUS. */
 static int
 handle_control_connection(int fd, uint32_t mask, void *data)
 {
@@ -253,8 +253,25 @@ handle_control_connection(int fd, uint32_t mask, void *data)
 			}
 			return 0; /* the connection stays open */
 		}
+	} else if (!strcmp(buf, "SECURE")) {
+		if (!uid_may_unlock(lock, uid)) {
+			AUDIT("refused SECURE from uid %d", (int) uid);
+			reply = "ERR not permitted\n";
+		} else if (lock_secure_engage(lock)) {
+			reply = "OK secure\n";
+		} else {
+			reply = "ERR locked\n";
+		}
+	} else if (!strcmp(buf, "RELEASE")) {
+		if (!uid_may_unlock(lock, uid)) {
+			AUDIT("refused RELEASE from uid %d", (int) uid);
+			reply = "ERR not permitted\n";
+		} else {
+			lock_secure_release(lock);
+			reply = lock->locked ? "OK locked\n" : "OK unlocked\n";
+		}
 	} else if (!strcmp(buf, "STATUS")) {
-		reply = lock->locked ? "OK locked\n" : "OK unlocked\n";
+		reply = lock->secure ? "OK secure\n" : lock->locked ? "OK locked\n" : "OK unlocked\n";
 	} else {
 		reply = "ERR unknown command\n";
 	}
@@ -306,19 +323,15 @@ lock_view_mapped(struct cg_lock *lock, struct cg_view *view)
 	view_set_visible(view, lock_view_allowed(lock, view));
 }
 
-void
-lock_engage(struct cg_lock *lock)
+static void
+isolate(struct cg_lock *lock, const char *event)
 {
 	struct cg_server *server = lock->server;
 	struct wlr_seat *wlr_seat = server->seat->seat;
 	struct cg_view *view, *lock_view = NULL;
 
-	if (lock->locked) {
-		return;
-	}
 	lock->locked = true;
-	AUDIT("locked");
-	notify_watchers(lock, "locked\n");
+	notify_watchers(lock, event);
 
 	wl_list_for_each (view, &server->views, link) {
 		bool privileged = lock_view_is_privileged(lock, view);
@@ -339,17 +352,45 @@ lock_engage(struct cg_lock *lock)
 }
 
 void
-lock_release(struct cg_lock *lock)
+lock_engage(struct cg_lock *lock)
+{
+	if (lock->locked && lock->secure) {
+		/* Locked during a secure prompt: it becomes a real lock. The
+		 * prompt's own view stays visible (it is privileged); the lock
+		 * service now puts its screen up alongside. */
+		lock->secure = false;
+		AUDIT("locked (during a secure prompt)");
+		notify_watchers(lock, "locked\n");
+		return;
+	}
+	if (lock->locked) {
+		return;
+	}
+	AUDIT("locked");
+	isolate(lock, "locked\n");
+}
+
+bool
+lock_secure_engage(struct cg_lock *lock)
+{
+	if (lock->locked) {
+		return false; /* no consent prompt over a locked machine */
+	}
+	lock->secure = true;
+	AUDIT("secure prompt engaged");
+	isolate(lock, "secure\n");
+	return true;
+}
+
+static void
+unisolate(struct cg_lock *lock, const char *event)
 {
 	struct cg_server *server = lock->server;
 	struct cg_view *view;
 
-	if (!lock->locked) {
-		return;
-	}
 	lock->locked = false;
-	AUDIT("unlocked");
-	notify_watchers(lock, "unlocked\n");
+	lock->secure = false;
+	notify_watchers(lock, event);
 
 	wlr_seat_keyboard_notify_clear_focus(server->seat->seat);
 	wl_list_for_each (view, &server->views, link) {
@@ -362,6 +403,26 @@ lock_release(struct cg_lock *lock)
 			break;
 		}
 	}
+}
+
+void
+lock_release(struct cg_lock *lock)
+{
+	if (!lock->locked) {
+		return;
+	}
+	AUDIT("unlocked");
+	unisolate(lock, "unlocked\n");
+}
+
+void
+lock_secure_release(struct cg_lock *lock)
+{
+	if (!lock->locked || !lock->secure) {
+		return; /* not ours to end: unlocked already, or turned into a lock */
+	}
+	AUDIT("secure prompt released");
+	unisolate(lock, "released\n");
 }
 
 void

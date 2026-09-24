@@ -17,6 +17,12 @@ struct cg_view;
 struct cg_lock {
 	struct cg_server *server;
 	bool locked;
+	/* The isolation is engaged for a secure prompt (elevation consent,
+	 * ADR 0012), not a lock: same visibility and focus rules, but watchers
+	 * are told "secure", so the lock service does not put up a lock screen,
+	 * and RELEASE -- not UNLOCK -- ends it. A LOCK while secure turns it
+	 * into a real lock, which RELEASE will then not undo. */
+	bool secure;
 
 	/* Who may unlock and who may connect on the privileged socket: the
 	 * machine session's account (sgsystem) and root. Taken from the kernel
@@ -61,5 +67,7 @@ void lock_restrict_global(struct cg_lock *lock, const struct wl_global *global);
 
 void lock_engage(struct cg_lock *lock);
 void lock_release(struct cg_lock *lock);
+bool lock_secure_engage(struct cg_lock *lock);
+void lock_secure_release(struct cg_lock *lock);
 
 #endif

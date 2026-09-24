@@ -18,7 +18,7 @@ install: build
 # The gate is sg-session's own session gate, run with this compositor hosting
 # the session instead of cage. Milestone 1 of ADR 0011 is exactly "that still
 # passes", so the gate is the same one, not a new one.
-test: test-session test-lock test-privileged test-sas
+test: test-session test-lock test-secure test-privileged test-sas
 
 test-session: build
 	@[ -d "$(SG_SESSION)" ] || { echo "sg-session checkout not found at $(SG_SESSION)"; exit 2; }
@@ -35,6 +35,11 @@ deb:
 
 clean:
 	rm -rf $(BUILD)
+
+# Secure prompt (elevation consent, ADR 0012): isolation without a lock screen.
+test-secure: build
+	@$(MAKE) -C $(SG_SESSION) security >/dev/null
+	@SG_SESSION=$(SG_SESSION) sh test/secure-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc
 
 # Session-scoped privileged protocols (milestone 3).
 test-privileged: build
