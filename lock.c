@@ -80,7 +80,7 @@ notify_watchers(struct cg_lock *lock, const char *event)
 {
 	struct cg_watcher *w, *tmp;
 	wl_list_for_each_safe (w, tmp, &lock->watchers, link) {
-		if (write(w->fd, event, strlen(event)) < 0) {
+		if (send(w->fd, event, strlen(event), MSG_NOSIGNAL) < 0) {
 			watcher_free(w);
 		}
 	}
@@ -248,7 +248,7 @@ handle_control_connection(int fd, uint32_t mask, void *data)
 							 WL_EVENT_READABLE, handle_watcher_event, w);
 			wl_list_insert(&lock->watchers, &w->link);
 			reply = lock->locked ? "OK locked\n" : "OK unlocked\n";
-			if (write(client_fd, reply, strlen(reply)) < 0) {
+			if (send(client_fd, reply, strlen(reply), MSG_NOSIGNAL) < 0) {
 				watcher_free(w);
 			}
 			return 0; /* the connection stays open */
@@ -275,7 +275,7 @@ handle_control_connection(int fd, uint32_t mask, void *data)
 	} else {
 		reply = "ERR unknown command\n";
 	}
-	if (write(client_fd, reply, strlen(reply)) < 0) {
+	if (send(client_fd, reply, strlen(reply), MSG_NOSIGNAL) < 0) {
 		/* nothing useful to do */
 	}
 	close(client_fd);

@@ -95,6 +95,17 @@ while True:
 WPID=$!
 sleep 1
 
+# A client that connects and hangs up without waiting for the reply must not
+# take the compositor down: the reply's write used to raise SIGPIPE, so one
+# connect from any local user ended the session -- or a lock screen.
+python3 -c "
+import socket; s=socket.socket(socket.AF_UNIX); s.connect('$T/ctl.sock'); s.close()"
+python3 -c "
+import socket; s=socket.socket(socket.AF_UNIX); s.connect('$T/ctl.sock'); s.sendall(b'STATUS\n'); s.close()"
+sleep 1
+if kill -0 "$CPID" 2>/dev/null && [ "$(ctl STATUS)" = "OK unlocked" ]; then pass "a client that hangs up early does not kill the compositor"
+else fail "the compositor died when a control client hung up"; echo "RESULT: FAIL"; exit 1; fi
+
 # 2. Secure prompt, then the prompt's display connects.
 [ "$(ctl SECURE)" = "OK secure" ] && pass "SECURE accepted" || fail "SECURE not accepted"
 [ "$(ctl STATUS)" = "OK secure" ] && pass "STATUS reports secure" || fail "STATUS does not report secure"
