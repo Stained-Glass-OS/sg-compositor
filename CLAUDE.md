@@ -98,6 +98,15 @@ Two things the mutation tests taught:
   mutant tripped `-Werror` and never built; the gate then "failed" against a
   missing binary, which looked like a catch and was nothing of the sort.
 
+## Remote Desktop sessions
+
+A Remote Desktop session (sg-session's `sg-rdp-authd`, ADR 0010) is this
+compositor on the **headless** backend, sized by `SG_OUTPUT_SIZE=WxH` -- the
+RDP client's desktop size -- rather than wlroots' fixed 1280x720; only outputs
+with no modes of their own take it. The RDP daemon is a privileged client: it
+captures with screencopy and types and points with the virtual keyboard and
+pointer, the same capabilities `make test-privileged` guards.
+
 ## Things that will bite you
 
 - **cage does not exit on SIGTERM while its child is stuck.** It stops its

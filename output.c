@@ -12,6 +12,7 @@
 #include "config.h"
 
 #include <assert.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <wayland-server-core.h>
@@ -313,6 +314,16 @@ handle_new_output(struct wl_listener *listener, void *data)
 				}
 			}
 		}
+	}
+
+	/* An output with no modes of its own (headless: a remote session) takes
+	 * its size from SG_OUTPUT_SIZE=WxH -- the RDP client's desktop size --
+	 * instead of wlroots' fixed 1280x720. */
+	const char *size = getenv("SG_OUTPUT_SIZE");
+	int w, h;
+	if (wl_list_empty(&wlr_output->modes) && size && sscanf(size, "%dx%d", &w, &h) == 2 && w >= 200 &&
+		w <= 8192 && h >= 200 && h <= 8192) {
+		wlr_output_state_set_custom_mode(&state, w, h, 0);
 	}
 
 	if (server->output_mode == CAGE_MULTI_OUTPUT_MODE_LAST && wl_list_length(&server->outputs) > 1) {
