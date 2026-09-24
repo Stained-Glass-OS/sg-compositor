@@ -1,3 +1,12 @@
+sg-compositor (0.2.0+sg2) unstable; urgency=medium
+
+  * SECURE/RELEASE: isolate the session for elevation consent prompts
+    without a lock screen (ADR 0012).
+  * A control client that hangs up early no longer kills the compositor
+    (SIGPIPE on the reply).
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Wed, 23 Sep 2026 22:48:07 -0700
+
 sg-compositor (0.2.0+sg1) unstable; urgency=medium
 
   * Initial package: cage 0.2.0 renamed, hosting the Stained Glass session.
