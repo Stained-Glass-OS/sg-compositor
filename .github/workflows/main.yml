@@ -1,78 +1,42 @@
-name: Continuous integration build
+name: CI
+
+# Upstream cage's workflow ran on 'master' in an Alpine/Arch matrix; this
+# repository's branch is 'main', and what ships is a Debian trixie package, so
+# it never ran and would not have tested the right thing. This builds the
+# package the image installs, in the distribution it installs into.
+#
+# The behaviour gates (make test: session, lock, secure, privileged, SAS)
+# need sg-session and wine-sg beside this repo and a headless session; they
+# run locally and in sg-image's boot gate, not here.
 on:
   push:
-    branches: [ master ]
+    branches: [main]
   pull_request:
-    branches: [ master ]
+  workflow_dispatch:
 
 jobs:
-  compile:
+  deb:
+    name: build .deb (Debian trixie)
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        CC: [ gcc, clang ]
-        OS: [ "alpine:edge", "archlinux:base-devel" ]
-        xwayland: [ enabled, disabled ]
-    container: ${{ matrix.OS }}
-    env:
-      CC: ${{ matrix.CC }}
+    container:
+      image: debian:trixie
+      options: --user root
     steps:
-      - name: Checkout Cage
-        uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
-      - name: Install dependencies (Alpine)
-        if: "matrix.OS == 'alpine:edge'"
-        run: apk add build-base xcb-util-wm-dev libseat-dev clang git eudev-dev mesa-dev libdrm-dev libinput-dev libxkbcommon-dev pixman-dev wayland-dev meson wayland-protocols xwayland-dev scdoc-doc hwdata
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends build-essential devscripts debhelper equivs make ca-certificates
+          apt-get build-dep -y --no-install-recommends ./
 
-      - name: Install dependencies (Arch)
-        if: "matrix.OS == 'archlinux:base-devel'"
-        run: |
-          pacman-key --init
-          pacman -Syu --noconfirm xcb-util-wm seatd git clang meson libinput libdrm mesa libxkbcommon wayland wayland-protocols xorg-server-xwayland scdoc
+      - name: Build package
+        run: dpkg-buildpackage -us -uc -b
 
-      - name: Fetch wlroots as a subproject
-        run: git clone https://gitlab.freedesktop.org/wlroots/wlroots.git subprojects/wlroots -b 0.18
+      - name: Collect package
+        run: mkdir -p dist && cp ../sg-compositor_*.deb dist/
 
-      - name: Compile Cage (XWayland=${{ matrix.xwayland }})
-        run: |
-          meson --fatal-meson-warnings \
-            build-${{ matrix.CC }}-${{matrix.xwayland }} \
-            -Dwlroots:xwayland=${{ matrix.xwayland }}
-          ninja -C build-${{ matrix.CC }}-${{matrix.xwayland }}
-
-  format:
-    runs-on: ubuntu-latest
-    container: "archlinux:base-devel"
-    steps:
-      - name: Checkout Cage
-        uses: actions/checkout@v2
-      - name: Install dependencies
-        run: |
-          pacman-key --init
-          pacman -Syu --noconfirm xcb-util-wm seatd git clang meson libinput libdrm mesa libxkbcommon wayland wayland-protocols xorg-server-xwayland scdoc hwdata
-      - name: Fetch wlroots as a subproject
-        run: git clone https://gitlab.freedesktop.org/wlroots/wlroots.git subprojects/wlroots -b 0.18
-      - name: Check for formatting changes
-        run: |
-          meson build-clang-format -Dwlroots:xwayland=enabled
-          ninja -C build-clang-format clang-format-check
-
-  scan-build:
-    runs-on: ubuntu-latest
-    container: "archlinux:base-devel"
-    env:
-      CC: clang
-    steps:
-      - name: Checkout Cage
-        uses: actions/checkout@v2
-      - name: Install dependencies
-        run: |
-          pacman-key --init
-          pacman -Syu --noconfirm xcb-util-wm seatd git clang meson libinput libdrm mesa libxkbcommon wayland wayland-protocols xorg-server-xwayland scdoc hwdata
-      - name: Fetch wlroots as a subproject
-        run: git clone https://gitlab.freedesktop.org/wlroots/wlroots.git subprojects/wlroots -b 0.18
-      - name: Run scan-build
-        run: |
-          meson build-scan-build -Dwlroots:xwayland=enabled
-          ninja -C build-scan-build scan-build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sg-compositor-deb
+          path: dist/*.deb
