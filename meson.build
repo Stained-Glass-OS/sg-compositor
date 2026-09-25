@@ -51,6 +51,8 @@ wayland_scanner_server = generator(
 
 server_protocols = [
   [wl_protocol_dir, 'stable/xdg-shell/xdg-shell.xml'],
+  # sg-compositor: not in wayland-protocols; vendored from wlroots (MIT).
+  [meson.current_source_dir(), 'protocol/wlr-output-power-management-unstable-v1.xml'],
 ]
 
 server_protos_headers = []

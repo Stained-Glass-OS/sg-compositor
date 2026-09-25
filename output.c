@@ -29,6 +29,7 @@
 #include <wlr/types/wlr_output.h>
 #include <wlr/types/wlr_output_layout.h>
 #include <wlr/types/wlr_output_management_v1.h>
+#include <wlr/types/wlr_output_power_management_v1.h>
 #include <wlr/types/wlr_scene.h>
 #include <wlr/types/wlr_xdg_shell.h>
 #include <wlr/util/log.h>
@@ -343,6 +344,66 @@ handle_new_output(struct wl_listener *listener, void *data)
 
 	view_position_all(output->server);
 	update_output_manager_config(output->server);
+}
+
+/* sg-compositor: display power (wlr-output-power-management-unstable-v1).
+ *
+ * "Turn off the screen after" is swayidle running `wlopm --off '*'`; a screen
+ * that is off is an output disabled in place -- it stays in the layout, so no
+ * window moves and XWayland's screen keeps its size, and nothing is rendered
+ * or scanned out. Any input turns it back on (see seat.c), as a monitor wakes
+ * on Windows, so a dead idle daemon can never leave the screen black. The
+ * output a Remote Desktop session is captured from is never turned off: the
+ * remote user is looking at it. */
+static void
+output_set_power(struct cg_output *output, bool on)
+{
+	struct wlr_output *wlr_output = output->wlr_output;
+	struct cg_server *server = output->server;
+
+	if (on ? !output->powered_off : !wlr_output->enabled) {
+		return;
+	}
+	if (!on && server->remote && wlr_output == server->remote_output) {
+		wlr_log(WLR_INFO, "Not turning off %s: a remote session shows it", wlr_output->name);
+		return;
+	}
+
+	struct wlr_output_state state;
+	wlr_output_state_init(&state);
+	wlr_output_state_set_enabled(&state, on);
+	if (wlr_output_commit_state(wlr_output, &state)) {
+		output->powered_off = !on;
+		wlr_log(WLR_INFO, "Output %s powered %s", wlr_output->name, on ? "on" : "off");
+		if (on) {
+			wlr_output_schedule_frame(wlr_output);
+		}
+	} else {
+		wlr_log(WLR_ERROR, "Could not power %s output %s", on ? "on" : "off", wlr_output->name);
+	}
+	wlr_output_state_finish(&state);
+}
+
+void
+handle_output_power_set_mode(struct wl_listener *listener, void *data)
+{
+	struct wlr_output_power_v1_set_mode_event *event = data;
+	struct cg_output *output = event->output->data;
+
+	if (output) {
+		output_set_power(output, event->mode == ZWLR_OUTPUT_POWER_V1_MODE_ON);
+	}
+}
+
+void
+output_power_wake(struct cg_server *server)
+{
+	struct cg_output *output;
+	wl_list_for_each (output, &server->outputs, link) {
+		if (output->powered_off) {
+			output_set_power(output, true);
+		}
+	}
 }
 
 void

@@ -13,6 +13,12 @@ Comment: Derived from cage 0.2.0 (https://github.com/cage-kiosk/cage), whose
  MIT for the whole repository, including our additions, per ADR 0011: one
  licence, and no mixed-licence files.
 
+Files: protocol/wlr-output-power-management-unstable-v1.xml
+Copyright: 2019 Purism SPC
+License: MIT
+Comment: The protocol definition, vendored from wlroots 0.18 (it is not in
+ wayland-protocols), unchanged.
+
 License: MIT
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal

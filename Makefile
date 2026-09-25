@@ -2,7 +2,7 @@
 BUILD ?= build
 SG_SESSION ?= ../sg-session
 
-.PHONY: all build test test-session test-lock test-privileged test-sas clean deb install
+.PHONY: all build test test-session test-lock test-privileged test-sas test-power clean deb install
 
 all: build
 
@@ -18,7 +18,7 @@ install: build
 # The gate is sg-session's own session gate, run with this compositor hosting
 # the session instead of cage. Milestone 1 of ADR 0011 is exactly "that still
 # passes", so the gate is the same one, not a new one.
-test: test-session test-lock test-secure test-privileged test-sas
+test: test-session test-lock test-secure test-privileged test-sas test-power
 
 test-session: build
 	@[ -d "$(SG_SESSION)" ] || { echo "sg-session checkout not found at $(SG_SESSION)"; exit 2; }
@@ -47,4 +47,8 @@ test-privileged: build
 
 # Reserved keys: Win+L and Ctrl+Alt+Del.
 test-sas: build
-	@sh test/sas-gate.sh; rc=$$?; [ $$rc -eq 77 ] \&\& exit 0 || exit $$rc
+	@sh test/sas-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc
+
+# Display power and idle (wlopm, swayidle): Settings' "Turn off the screen after".
+test-power: build
+	@sh test/power-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc

@@ -57,6 +57,7 @@ struct cg_server {
 	struct wlr_output_manager_v1 *output_manager_v1;
 	struct wl_listener output_manager_apply;
 	struct wl_listener output_manager_test;
+	struct wl_listener output_power_set_mode; /* sg-compositor: display power */
 
 	struct wlr_relative_pointer_manager_v1 *relative_pointer_manager;
 

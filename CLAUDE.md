@@ -132,6 +132,38 @@ The reply is `OK remote <output> <W>x<H>`.
   physical-input filter is not in a gate, because headless has no physical
   devices.
 
+## Display power and idle (`make test-power`)
+
+Settings' "Turn off the screen after" is sg-session's `sg-settingsctl`
+starting `swayidle -w timeout N "wlopm --off '*'" resume "wlopm --on '*'"`
+(plus `before-sleep`, which locks). Two protocols make that real:
+
+- **ext-idle-notify-v1** (wlroots' idle notifier, cage's) -- every input
+  event is activity; **idle inhibitors** (idle-inhibit-unstable-v1) hold it
+  off, any inhibitor at all (cage's rule: no visibility check).
+- **wlr-output-power-management-unstable-v1** (`wlopm`), new here. The XML
+  is vendored in `protocol/` (not in wayland-protocols; Purism, MIT). A
+  screen turned off is its output **disabled in place**: it stays in the
+  layout, so no window moves and XWayland's screen keeps its size (the gate
+  checks `xdpyinfo`), and nothing is rendered or captured. **Any input turns
+  it back on** (`seat_notify_activity` -> `output_power_wake`), as a monitor
+  wakes on Windows -- so a dead idle daemon can never leave the screen black.
+  Offered to every client, not privileged: turning a screen off is what any
+  Windows program may do (`SC_MONITORPOWER`). The output a Remote Desktop
+  session is captured from is never turned off.
+
+The gate (headless, 18 checks): the global offered; wlopm off/on with
+capture failing while off; XWayland's size kept; a key wakes the screen;
+swayidle's timeout and resume; keys resetting the timer; an inhibitor
+holding a timeout off and releasing it; Settings' exact swayidle+wlopm
+chain. Mutants, each shown to build: no power manager (8 fail), no wake on
+input (1), input not reported as activity (2), inhibitors ignored (1).
+
+Not yet: Windows programs cannot inhibit idle -- Wine's
+`SetThreadExecutionState(ES_DISPLAY_REQUIRED)` does not reach the
+compositor, and XWayland has no inhibitor of its own, so a full-screen video
+in Media Player does not keep the screen on.
+
 ## Things that will bite you
 
 - **cage does not exit on SIGTERM while its child is stuck.** It stops its

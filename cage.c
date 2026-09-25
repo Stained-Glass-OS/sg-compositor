@@ -29,6 +29,7 @@
 #include <wlr/types/wlr_gamma_control_v1.h>
 #include <wlr/types/wlr_idle_inhibit_v1.h>
 #include <wlr/types/wlr_idle_notify_v1.h>
+#include <wlr/types/wlr_output_power_management_v1.h>
 #include <wlr/types/wlr_output_layout.h>
 #include <wlr/types/wlr_output_management_v1.h>
 #include <wlr/types/wlr_presentation_time.h>
@@ -533,6 +534,18 @@ main(int argc, char *argv[])
 	wl_signal_add(&server.output_manager_v1->events.apply, &server.output_manager_apply);
 	server.output_manager_test.notify = handle_output_manager_test;
 	wl_signal_add(&server.output_manager_v1->events.test, &server.output_manager_test);
+
+	/* sg-compositor: display power, for "turn off the screen after" (swayidle
+	 * and wlopm). Offered to every client: turning a screen off is what any
+	 * Windows program may do too (SC_MONITORPOWER), and input wakes it. */
+	struct wlr_output_power_manager_v1 *output_power = wlr_output_power_manager_v1_create(server.wl_display);
+	if (!output_power) {
+		wlr_log(WLR_ERROR, "Unable to create the output power manager");
+		ret = 1;
+		goto end;
+	}
+	server.output_power_set_mode.notify = handle_output_power_set_mode;
+	wl_signal_add(&output_power->events.set_mode, &server.output_power_set_mode);
 
 	struct wlr_gamma_control_manager_v1 *gamma = wlr_gamma_control_manager_v1_create(server.wl_display);
 	lock_restrict_global(&server.lock, gamma ? gamma->global : NULL);
