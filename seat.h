@@ -48,6 +48,16 @@ struct cg_seat {
 	struct wl_listener request_set_cursor;
 	struct wl_listener request_set_selection;
 	struct wl_listener request_set_primary_selection;
+
+	/* sg-compositor: an elevated window being moved or resized by the user
+	 * (its _NET_WM_MOVERESIZE), see elevated.c. */
+	struct cg_view *grab_view;
+	bool grab_resize;
+	uint32_t grab_edges;
+	double grab_cx, grab_cy;
+	struct wlr_box grab_box;
+	/* Alt+Tab pressed in an elevated window: switch on this key's release. */
+	uint32_t switch_keycode;
 };
 
 struct cg_keyboard_group {

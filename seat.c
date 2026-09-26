@@ -35,6 +35,7 @@
 #include <wlr/xwayland.h>
 #endif
 
+#include "elevated.h"
 #include "output.h"
 #include "seat.h"
 #include "server.h"
@@ -367,6 +368,17 @@ handle_reserved_key(struct cg_seat *seat, uint32_t modifiers, const xkb_keysym_t
 	return false;
 }
 
+static bool
+keysyms_have(const xkb_keysym_t *syms, int nsyms, xkb_keysym_t sym)
+{
+	for (int i = 0; i < nsyms; i++) {
+		if (syms[i] == sym || (sym == XKB_KEY_Tab && syms[i] == XKB_KEY_ISO_Left_Tab)) {
+			return true;
+		}
+	}
+	return false;
+}
+
 static void
 handle_key_event(struct wlr_keyboard *keyboard, struct cg_seat *seat, void *data, bool is_virtual)
 {
@@ -398,9 +410,24 @@ handle_key_event(struct wlr_keyboard *keyboard, struct cg_seat *seat, void *data
 	uint32_t modifiers = wlr_keyboard_get_modifiers(keyboard);
 	if (event->state == WL_KEYBOARD_KEY_STATE_RELEASED && take_consumed_release(keycode)) {
 		handled = true;
+		if (seat->switch_keycode == keycode) {
+			/* Switched on the Tab's release, not its press: the
+			 * session must not be handed a Tab it will never see
+			 * released (it would repeat for ever). */
+			seat->switch_keycode = 0;
+			elevated_focus_session(seat->server);
+		}
 	} else if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED &&
 		   handle_reserved_key(seat, modifiers, syms, nsyms)) {
 		mark_consumed(keycode);
+		handled = true;
+	} else if ((modifiers & WLR_MODIFIER_ALT) && event->state == WL_KEYBOARD_KEY_STATE_PRESSED &&
+		   seat_get_focus(seat) && seat_get_focus(seat)->elevated && keysyms_have(syms, nsyms, XKB_KEY_Tab)) {
+		/* sg-compositor: Alt+Tab in an elevated window goes back to the
+		 * session, whose own switcher then lists every window. The
+		 * elevated display has no switcher of its own. */
+		mark_consumed(keycode);
+		seat->switch_keycode = keycode; /* on its release, below */
 		handled = true;
 	} else if ((modifiers & WLR_MODIFIER_ALT) && event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
 		/* If Alt is held down and this button was pressed, we
@@ -411,6 +438,11 @@ handle_key_event(struct wlr_keyboard *keyboard, struct cg_seat *seat, void *data
 		}
 	}
 
+	if (!handled && event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+		/* sg-compositor: the user typing into an elevated window is
+		 * what lets the session's clipboard text reach it. */
+		elevated_user_input(seat_get_focus(seat));
+	}
 	if (!handled) {
 		/* Otherwise, we pass it along to the client. */
 		wlr_seat_set_keyboard(seat->seat, keyboard);
@@ -731,6 +763,14 @@ handle_cursor_button(struct wl_listener *listener, void *data)
 		return;
 	}
 
+	elevated_grab_button(seat, event->state == WL_POINTER_BUTTON_STATE_PRESSED);
+	if (event->state == WL_POINTER_BUTTON_STATE_PRESSED) {
+		/* sg-compositor: a click on an elevated window, like a key, lets
+		 * the session's clipboard text reach it (a menu's Paste). */
+		double sx, sy;
+		struct wlr_surface *surface;
+		elevated_user_input(desktop_view_at(seat->server, seat->cursor->x, seat->cursor->y, &surface, &sx, &sy));
+	}
 	wlr_seat_pointer_notify_button(seat->seat, event->time_msec, event->button, event->state);
 	press_cursor_button(seat, &event->pointer->base, event->time_msec, event->button, event->state, seat->cursor->x,
 			    seat->cursor->y);
@@ -744,6 +784,13 @@ process_cursor_motion(struct cg_seat *seat, uint32_t time_msec, double dx, doubl
 	double sx, sy;
 	struct wlr_seat *wlr_seat = seat->seat;
 	struct wlr_surface *surface = NULL;
+
+	/* sg-compositor: an elevated window being moved or resized by the user
+	 * takes the motion; the window under the pointer does not see it. */
+	if (elevated_grab_motion(seat, seat->cursor->x, seat->cursor->y)) {
+		seat_notify_activity(seat->server);
+		return;
+	}
 
 	struct cg_view *view = desktop_view_at(seat->server, seat->cursor->x, seat->cursor->y, &surface, &sx, &sy);
 	if (!view) {
@@ -1078,9 +1125,12 @@ seat_set_focus(struct cg_seat *seat, struct cg_view *view)
 
 	/* Move the view to the front, but only if it isn't a
 	   fullscreen view. */
-	if (!view_is_primary(view)) {
+	if (!view_is_primary(view) || view->elevated) {
 		wl_list_remove(&view->link);
 		wl_list_insert(&server->views, &view->link);
+	}
+	if (view->elevated) {
+		elevated_view_focused(view);
 	}
 
 	view_activate(view, true);

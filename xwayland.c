@@ -12,6 +12,7 @@
 #include <wlr/util/log.h>
 #include <wlr/xwayland.h>
 
+#include "elevated.h"
 #include "server.h"
 #include "view.h"
 #include "xwayland.h"
@@ -141,6 +142,9 @@ handle_xwayland_surface_destroy(struct wl_listener *listener, void *data)
 
 	wl_list_remove(&xwayland_view->destroy.link);
 	wl_list_remove(&xwayland_view->request_fullscreen.link);
+	if (view->elevated) {
+		elevated_view_unlisten(xwayland_view);
+	}
 	xwayland_view->xwayland_surface = NULL;
 
 	view_destroy(view);
@@ -177,11 +181,9 @@ handle_xwayland_dissociate(struct wl_listener *listener, void *data)
 }
 
 void
-handle_xwayland_surface_new(struct wl_listener *listener, void *data)
+xwayland_view_create(struct cg_server *server, struct wlr_xwayland_surface *xwayland_surface,
+		     struct cg_elevated *elevated)
 {
-	struct cg_server *server = wl_container_of(listener, server, new_xwayland_surface);
-	struct wlr_xwayland_surface *xwayland_surface = data;
-
 	struct cg_xwayland_view *xwayland_view = calloc(1, sizeof(struct cg_xwayland_view));
 	if (!xwayland_view) {
 		wlr_log(WLR_ERROR, "Failed to allocate XWayland view");
@@ -190,6 +192,8 @@ handle_xwayland_surface_new(struct wl_listener *listener, void *data)
 
 	view_init(&xwayland_view->view, server, CAGE_XWAYLAND_VIEW, &xwayland_view_impl);
 	xwayland_view->xwayland_surface = xwayland_surface;
+	/* sg-compositor: a window of an elevated program's own display. */
+	xwayland_view->view.elevated = elevated;
 
 	xwayland_view->associate.notify = handle_xwayland_associate;
 	wl_signal_add(&xwayland_surface->events.associate, &xwayland_view->associate);
@@ -199,4 +203,14 @@ handle_xwayland_surface_new(struct wl_listener *listener, void *data)
 	wl_signal_add(&xwayland_surface->events.destroy, &xwayland_view->destroy);
 	xwayland_view->request_fullscreen.notify = handle_xwayland_surface_request_fullscreen;
 	wl_signal_add(&xwayland_surface->events.request_fullscreen, &xwayland_view->request_fullscreen);
+	if (elevated) {
+		elevated_view_listen(xwayland_view);
+	}
+}
+
+void
+handle_xwayland_surface_new(struct wl_listener *listener, void *data)
+{
+	struct cg_server *server = wl_container_of(listener, server, new_xwayland_surface);
+	xwayland_view_create(server, data, NULL);
 }

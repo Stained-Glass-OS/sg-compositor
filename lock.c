@@ -43,6 +43,7 @@
 #include <wlr/types/wlr_seat.h>
 #include <wlr/util/log.h>
 
+#include "elevated.h"
 #include "output.h"
 #include "seat.h"
 #include "server.h"
@@ -322,6 +323,7 @@ handle_control_connection(int fd, uint32_t mask, void *data)
 	char buf[64] = {0}, remote_reply[128];
 	const char *reply;
 	int passed_fd = -1;
+	int fds[3] = {-1, -1, -1}, n_fds = 0;
 	int client_fd;
 	uid_t uid = (uid_t) -1; /* reported as -1 if the kernel cannot say */
 	ssize_t n;
@@ -341,21 +343,36 @@ handle_control_connection(int fd, uint32_t mask, void *data)
 		return 0;
 	}
 	{
-		/* REMOTE may come with a descriptor (SCM_RIGHTS). */
-		char cbuf[CMSG_SPACE(sizeof(int))];
+		/* REMOTE may come with a descriptor, ELEVATED with three
+		 * (SCM_RIGHTS). */
+		char cbuf[CMSG_SPACE(3 * sizeof(int))];
 		struct iovec iov = {.iov_base = buf, .iov_len = sizeof(buf) - 1};
 		struct msghdr mh = {.msg_iov = &iov, .msg_iovlen = 1, .msg_control = cbuf, .msg_controllen = sizeof(cbuf)};
 		struct cmsghdr *cm;
 		n = recvmsg(client_fd, &mh, MSG_CMSG_CLOEXEC);
 		for (cm = n > 0 ? CMSG_FIRSTHDR(&mh) : NULL; cm; cm = CMSG_NXTHDR(&mh, cm)) {
-			if (cm->cmsg_level == SOL_SOCKET && cm->cmsg_type == SCM_RIGHTS &&
-			    cm->cmsg_len == CMSG_LEN(sizeof(int))) {
-				memcpy(&passed_fd, CMSG_DATA(cm), sizeof(int));
+			if (cm->cmsg_level == SOL_SOCKET && cm->cmsg_type == SCM_RIGHTS) {
+				size_t k = (cm->cmsg_len - CMSG_LEN(0)) / sizeof(int);
+				for (size_t j = 0; j < k; j++) {
+					int f;
+					memcpy(&f, CMSG_DATA(cm) + j * sizeof(int), sizeof(int));
+					if (n_fds < 3) {
+						fds[n_fds++] = f;
+					} else {
+						close(f);
+					}
+				}
 			}
 		}
 	}
 	if (n > 0 && buf[n - 1] == '\n') {
 		buf[n - 1] = 0;
+	}
+	/* One descriptor is REMOTE's; three are ELEVATED's, taken below. */
+	if (n_fds == 1) {
+		passed_fd = fds[0];
+		fds[0] = -1;
+		n_fds = 0;
 	}
 
 	if (!strcmp(buf, "LOCK")) {
@@ -428,6 +445,40 @@ handle_control_connection(int fd, uint32_t mask, void *data)
 			remote_detach(lock->server, "remote desktop disconnected");
 			reply = lock->locked ? "OK locked\n" : "OK unlocked\n";
 		}
+	} else if (!strcmp(buf, "ELEVATED")) {
+		/* An elevated program's own X server (ADR 0012, elevated.c): only
+		 * the SYSTEM account (the broker) or root may hand one over. */
+		if (!uid_may_unlock(lock, uid)) {
+			AUDIT("refused ELEVATED from uid %d", (int) uid);
+			reply = "ERR not permitted\n";
+		} else if (n_fds != 3) {
+			reply = "ERR need three descriptors\n";
+		} else {
+			bool ok = elevated_adopt(lock->server, uid, fds[0], fds[1], fds[2]);
+			n_fds = 0; /* the compositor's now, or closed */
+			reply = ok ? "OK elevated\n" : "ERR cannot\n";
+		}
+	} else if (!strncmp(buf, "ACTIVATE ", 9)) {
+		/* The taskbar or the switcher brings an elevated window forward.
+		 * Anyone in the session may: it is focus, not input. */
+		int id = -1;
+		unsigned long window = 0;
+		if (!uid_may_lock(lock, uid)) {
+			AUDIT("refused ACTIVATE from uid %d", (int) uid);
+			reply = "ERR not permitted\n";
+		} else if (sscanf(buf + 9, "%d %lu", &id, &window) == 2 && elevated_activate(lock->server, id, window)) {
+			reply = "OK\n";
+		} else {
+			reply = "ERR no such window\n";
+		}
+	} else if (!strcmp(buf, "WINDOWS")) {
+		static char list[8192];
+		if (!uid_may_lock(lock, uid)) {
+			reply = "ERR not permitted\n";
+		} else {
+			elevated_list(lock->server, list, sizeof(list));
+			reply = list;
+		}
 	} else if (!strcmp(buf, "STATUS")) {
 		reply = lock->secure ? "OK secure\n" : lock->locked ? "OK locked\n" : "OK unlocked\n";
 	} else {
@@ -438,6 +489,9 @@ handle_control_connection(int fd, uint32_t mask, void *data)
 		wl_client_destroy(lock->server->remote_client);
 	} else if (passed_fd >= 0 && !lock->server->remote_client) {
 		close(passed_fd);
+	}
+	for (int i = 0; i < n_fds; i++) {
+		close(fds[i]);
 	}
 	if (send(client_fd, reply, strlen(reply), MSG_NOSIGNAL) < 0) {
 		/* nothing useful to do */
@@ -484,7 +538,7 @@ view_set_visible(struct cg_view *view, bool visible)
 void
 lock_view_mapped(struct cg_lock *lock, struct cg_view *view)
 {
-	view_set_visible(view, lock_view_allowed(lock, view));
+	view_set_visible(view, lock_view_allowed(lock, view) && !view->minimized);
 }
 
 static void
@@ -558,11 +612,11 @@ unisolate(struct cg_lock *lock, const char *event)
 
 	wlr_seat_keyboard_notify_clear_focus(server->seat->seat);
 	wl_list_for_each (view, &server->views, link) {
-		view_set_visible(view, true);
+		view_set_visible(view, !view->minimized);
 	}
 	/* Give focus back to the most recent ordinary view. */
 	wl_list_for_each (view, &server->views, link) {
-		if (!lock_view_is_privileged(lock, view)) {
+		if (!lock_view_is_privileged(lock, view) && !view->minimized) {
 			seat_set_focus(server->seat, view);
 			break;
 		}
@@ -606,6 +660,10 @@ static bool
 global_filter(const struct wl_client *client, const struct wl_global *global, void *data)
 {
 	struct cg_lock *lock = data;
+	int elevated = elevated_filter_global(lock->server, client, global);
+	if (elevated >= 0) {
+		return elevated;
+	}
 	for (int i = 0; i < lock->n_restricted; i++) {
 		if (lock->restricted[i] == global) {
 			return lock_client_is_privileged(lock, client);

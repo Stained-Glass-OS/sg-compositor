@@ -17,6 +17,7 @@
 #include <wlr/types/wlr_scene.h>
 #include <wlr/util/box.h>
 
+#include "elevated.h"
 #include "output.h"
 #include "seat.h"
 #include "server.h"
@@ -120,6 +121,12 @@ view_layout_box(struct cg_view *view, struct wlr_box *box)
 }
 
 void
+view_get_layout_box(struct cg_view *view, struct wlr_box *box)
+{
+	view_layout_box(view, box);
+}
+
+void
 view_position(struct cg_view *view)
 {
 	struct wlr_box layout_box;
@@ -137,7 +144,11 @@ view_position_all(struct cg_server *server)
 {
 	struct cg_view *view;
 	wl_list_for_each (view, &server->views, link) {
-		view_position(view);
+		if (view->elevated) {
+			elevated_view_place(view);
+		} else {
+			view_position(view);
+		}
 	}
 }
 
@@ -146,6 +157,9 @@ view_unmap(struct cg_view *view)
 {
 	wl_list_remove(&view->link);
 
+	if (view->server->seat->grab_view == view) {
+		view->server->seat->grab_view = NULL;
+	}
 	wlr_scene_node_destroy(&view->scene_tree->node);
 
 	view->wlr_surface->data = NULL;
@@ -155,29 +169,46 @@ view_unmap(struct cg_view *view)
 void
 view_map(struct cg_view *view, struct wlr_surface *surface)
 {
-	view->scene_tree = wlr_scene_subsurface_tree_create(&view->server->scene->tree, surface);
+	struct cg_server *server = view->server;
+	struct wlr_scene_tree *parent;
+
+	view->wlr_surface = surface;
+	surface->data = view;
+
+	/* sg-compositor: the session's windows at the bottom, elevated programs'
+	 * above them, privileged ones (lock screen, consent prompt) on top. */
+	if (view->elevated) {
+		parent = server->elevated_tree;
+	} else if (lock_view_is_privileged(&server->lock, view)) {
+		parent = server->privileged_tree;
+	} else {
+		parent = server->normal_tree;
+	}
+	view->scene_tree = wlr_scene_subsurface_tree_create(parent, surface);
 	if (!view->scene_tree) {
+		view->wlr_surface = NULL;
+		surface->data = NULL;
 		wl_resource_post_no_memory(surface->resource);
 		return;
 	}
 	view->scene_tree->node.data = view;
 
-	view->wlr_surface = surface;
-	surface->data = view;
-
+	if (view->elevated) {
+		elevated_view_mapped(view);
+	} else
 #if CAGE_HAS_XWAYLAND
-	/* We shouldn't position override-redirect windows. They set
-	   their own (x,y) coordinates in handle_wayland_surface_map. */
-	if (view->type != CAGE_XWAYLAND_VIEW || xwayland_view_should_manage(view))
+		/* We shouldn't position override-redirect windows. They set
+		   their own (x,y) coordinates in handle_wayland_surface_map. */
+		if (view->type != CAGE_XWAYLAND_VIEW || xwayland_view_should_manage(view))
 #endif
 	{
 		view_position(view);
 	}
 
-	wl_list_insert(&view->server->views, &view->link);
+	wl_list_insert(&server->views, &view->link);
 	/* sg-compositor: a window opened during a lock stays hidden. */
-	lock_view_mapped(&view->server->lock, view);
-	seat_set_focus(view->server->seat, view);
+	lock_view_mapped(&server->lock, view);
+	seat_set_focus(server->seat, view);
 }
 
 void

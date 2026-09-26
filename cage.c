@@ -54,6 +54,7 @@
 #include <wlr/xwayland.h>
 #endif
 
+#include "elevated.h"
 #include "idle_inhibit_v1.h"
 #include "output.h"
 #include "seat.h"
@@ -395,12 +396,24 @@ main(int argc, char *argv[])
 
 	server.scene_output_layout = wlr_scene_attach_output_layout(server.scene, server.output_layout);
 
+	/* sg-compositor: stacking layers, bottom to top (see server.h). */
+	server.normal_tree = wlr_scene_tree_create(&server.scene->tree);
+	server.elevated_tree = wlr_scene_tree_create(&server.scene->tree);
+	server.privileged_tree = wlr_scene_tree_create(&server.scene->tree);
+	if (!server.normal_tree || !server.elevated_tree || !server.privileged_tree) {
+		wlr_log(WLR_ERROR, "Unable to create the scene layers");
+		ret = 1;
+		goto end;
+	}
+	elevated_init(&server);
+
 	struct wlr_compositor *compositor = wlr_compositor_create(server.wl_display, 6, server.renderer);
 	if (!compositor) {
 		wlr_log(WLR_ERROR, "Unable to create the wlroots compositor");
 		ret = 1;
 		goto end;
 	}
+	server.compositor = compositor;
 
 	if (!wlr_subcompositor_create(server.wl_display)) {
 		wlr_log(WLR_ERROR, "Unable to create the wlroots subcompositor");
@@ -585,6 +598,7 @@ main(int argc, char *argv[])
 #if CAGE_HAS_XWAYLAND
 	struct wlr_xcursor_manager *xcursor_manager = NULL;
 	struct wlr_xwayland *xwayland = wlr_xwayland_create(server.wl_display, compositor, true);
+	server.xwayland = xwayland;
 	if (!xwayland) {
 		wlr_log(WLR_ERROR, "Cannot create XWayland server");
 	} else {
@@ -652,6 +666,7 @@ main(int argc, char *argv[])
 
 #if CAGE_HAS_XWAYLAND
 	wlr_xwayland_destroy(xwayland);
+	server.xwayland = NULL;
 	wlr_xcursor_manager_destroy(xcursor_manager);
 #endif
 	wl_display_destroy_clients(server.wl_display);

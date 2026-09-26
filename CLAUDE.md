@@ -164,6 +164,78 @@ Not yet: Windows programs cannot inhibit idle -- Wine's
 compositor, and XWayland has no inhibitor of its own, so a full-screen video
 in Media Player does not keep the screen on.
 
+## Elevated programs' displays (`elevated.c`, `make test-elevated`)
+
+ADR 0012, bug B56. An elevated program runs as SYSTEM (`sgsystem`), and on
+the session's X server any session program could type into it (XTEST,
+XSendEvent) or read it (XGetImage) -- the hole Windows closes with UIPI. So
+each elevated program gets **an Xwayland of its own**, and this compositor is
+its window manager:
+
+- sg-session's `sg-elevated-run` (exec'd by sg-brokerd after consent, as
+  SYSTEM) makes the X server's Wayland and window-manager socketpairs and a
+  readiness pipe, and hands the compositor its ends with **`ELEVATED` +
+  three fds (SCM_RIGHTS)** on the control socket -- the lock account or root
+  only (`ERR not permitted`, audited). Then it runs `Xwayland -rootless -wm
+  FD -displayfd FD -auth COOKIE` as SYSTEM and writes the display number to
+  the pipe; only then does the compositor connect its window manager (xcb
+  waits for the X server, which first waits for us). The X server is never
+  this compositor's child: the compositor runs as the user, the one account
+  that must not own an elevated display.
+- wlroots' `wlr_xwayland_create_with_server()` takes a **hand-built
+  `wlr_xwayland_server`** (never spawned, never restarted) and our own
+  `xwayland_shell_v1`. Traps: set `xwayland->shell_v1` before emitting
+  `ready` (xwm_create dereferences it); every Xwayland binds the first
+  `xwayland_shell_v1` it sees and wlroots kills it for the wrong one, so the
+  global filter shows each shell to its own client only -- and hides any
+  shell or `wl_seat` that is being created, because it is announced to every
+  client before `elevated_adopt()` has recorded it (the session's Xwayland
+  bound one and died); the xwm destroys itself on hang-up but leaves
+  `xwayland->xwm` dangling (detected by the seat it dropped).
+- **Its windows**: a scene layer of their own, above every session window
+  (a session program can neither cover nor imitate an elevated window's
+  place) and below privileged views. Managed windows go where they ask
+  (`request_configure`), are moved and resized by `_NET_WM_MOVERESIZE` (Wine
+  sends it for a drag on its title bar; SYSTEM's HKCU has `Decorated=N`, so
+  Wine draws the caption), minimised (hidden) and maximised. They keep their
+  place relative to the session's layout box (Remote Desktop). While locked
+  they are hidden and unfocusable like any session window.
+- **Keyboard**: Alt+Tab in an elevated window gives the focus back to the
+  session (on the Tab's *release*: switching on the press handed the session
+  a Tab it never saw released, and it repeated for ever). `ACTIVATE <display>
+  <window>` (anyone in the session: focus, not input) brings one forward --
+  the taskbar's button (wine-sg 0290, through `sg-lockctl ACTIVATE`).
+  `WINDOWS` lists them (`<display> <window> x y w h shown|minimized|hidden
+  focused|- title`, then `END`).
+- **Clipboard and drag and drop** (UIPI's rule): each elevated display has a
+  hidden clipboard seat. Text the elevated program copies is offered to the
+  session; the session's text is offered to it only when the user presses a
+  key or a button on one of its windows (input only the compositor makes),
+  never on its own; text only (proxy data sources, which also get round the
+  xwm ignoring any Xwayland's selection); no primary selection, no drags
+  either way, and no data device for elevated X servers. Note wlroots' xwm
+  serves a paste only to a *focused* surface on either side.
+
+**The gate** runs the elevated side as another account (`sudo -n -u
+sgsystem`; 77 without it): the window appears, focused, on screen (privileged
+capture), and keys reach it and not the session; a session adversary
+(`test/elevated-fixture.c`) cannot connect to its X server or read its cookie,
+and XTEST, XSendEvent and XGetImage reach nothing of it (teeth: the same
+attack reaches a session window); Alt+Tab, ACTIVATE, click-to-focus and
+drag-to-move; the clipboard rules (checked by the X selection owner, not a
+paste, which the xwm refuses unfocused); a lock hides it and ACTIVATE during
+a lock neither shows nor focuses it; the display ends with the program.
+
+Mutants, each shown to build: `sg-elevated-run` keeping the requester's
+DISPLAY (the program on the session's display) fails section 2 on XTEST,
+XSendEvent and XGetImage; ELEVATED accepted from anyone; the session's
+clipboard offered on focus rather than on input; elevated views allowed
+while locked.
+
+**The gate itself must never touch `:0`**: the agent's shell has DISPLAY=:0
+(David's desktop). An adversary run without an explicit DISPLAY typed there
+once. The gate unsets DISPLAY and the fixture refuses `:0` or none.
+
 ## Things that will bite you
 
 - **cage does not exit on SIGTERM while its child is stuck.** It stops its

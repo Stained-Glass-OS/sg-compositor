@@ -21,6 +21,8 @@ enum cg_view_type {
 #endif
 };
 
+struct cg_elevated;
+
 struct cg_view {
 	struct cg_server *server;
 	struct wl_list link; // server::views
@@ -32,6 +34,16 @@ struct cg_view {
 
 	enum cg_view_type type;
 	const struct cg_view_impl *impl;
+
+	/* sg-compositor: a window of an elevated program's display (elevated.c),
+	 * or NULL for the session's own. */
+	struct cg_elevated *elevated;
+	bool minimized;
+	bool maximized;
+	struct wlr_box restore; /* geometry before maximising */
+	/* Position relative to the origin of the layout box it lives in, so it
+	 * follows the session to a Remote Desktop output and back. */
+	int rx, ry;
 };
 
 struct cg_view_impl {
@@ -49,6 +61,7 @@ bool view_is_primary(struct cg_view *view);
 bool view_is_transient_for(struct cg_view *child, struct cg_view *parent);
 void view_activate(struct cg_view *view, bool activate);
 void view_position(struct cg_view *view);
+void view_get_layout_box(struct cg_view *view, struct wlr_box *box);
 void view_position_all(struct cg_server *server);
 void view_unmap(struct cg_view *view);
 void view_map(struct cg_view *view, struct wlr_surface *surface);

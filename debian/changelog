@@ -1,3 +1,20 @@
+sg-compositor (0.2.0+sg6) unstable; urgency=medium
+
+  * Elevated programs' displays (ADR 0012, B56): ELEVATED on the control
+    socket (the lock account or root, with the X server's Wayland and
+    window-manager connections and a readiness pipe) makes this compositor
+    the window manager of an elevated program's own Xwayland, run as SYSTEM
+    by sg-session's sg-elevated-run. Its windows are managed (placed, moved
+    and resized by _NET_WM_MOVERESIZE, minimised, maximised), stacked above
+    the session's and below privileged views, hidden while locked. Alt+Tab
+    leaves them for the session; ACTIVATE (the taskbar) and WINDOWS.
+    Clipboard: elevated -> session text; session -> elevated text only on
+    the user's own key or click in it; no drag and drop.
+    Gate: make test-elevated (a session adversary's XTEST, XSendEvent and
+    XGetImage reach nothing of it), mutant-proven.
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Sat, 26 Sep 2026 00:45:00 -0700
+
 sg-compositor (0.2.0+sg5) unstable; urgency=medium
 
   * Display power: wlr-output-power-management-unstable-v1, so wlopm and

@@ -82,6 +82,19 @@ struct cg_server {
 	 * the session goes back to the console. */
 	struct wl_client *remote_client;
 	struct wl_listener remote_client_destroy;
+
+	/* sg-compositor: elevated programs' displays (elevated.c). Stacking, from
+	 * the bottom: the session's views, elevated programs' windows -- which no
+	 * session window can cover -- and privileged views (lock screen, consent
+	 * prompt) on top of everything. */
+	struct wl_list elevated; /* cg_elevated::link */
+	struct wlr_scene_tree *normal_tree;
+	struct wlr_scene_tree *elevated_tree;
+	struct wlr_scene_tree *privileged_tree;
+	struct wlr_compositor *compositor;
+#if CAGE_HAS_XWAYLAND
+	struct wlr_xwayland *xwayland; /* the session's own */
+#endif
 };
 
 void server_terminate(struct cg_server *server);

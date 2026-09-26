@@ -114,6 +114,7 @@ endif
 
 cage_sources = [
   'lock.c',
+  'elevated.c',
   'cage.c',
   'idle_inhibit_v1.c',
   'output.c',
@@ -126,6 +127,7 @@ cage_headers = [
   configure_file(input: 'config.h.in',
                  output: 'config.h',
                  configuration: conf_data),
+  'elevated.h',
   'idle_inhibit_v1.h',
   'output.h',
   'seat.h',
