@@ -166,7 +166,7 @@ in Media Player does not keep the screen on.
 
 ## Elevated programs' displays (`elevated.c`, `make test-elevated`)
 
-**Status (2026-09-26): on branches `b56-elevated-display` (sg-compositor, sg-session, wine-sg, sg-image, stained-glass), NOT pushed. Headless gates pass (sg-compositor `make test-elevated` + mutants, sg-session `make test`/`test-consent`); a local NSIS-installer smoke test on an elevated display passes; wine-sg 10.0-71 (0290/0291) builds. Next: run sg-image `make elevated-test` (image already built at /var/tmp/b56/sg-image/build with wine 10.0-69), then take the next free versions and push.**
+**Status (2026-09-26): shipped. sg-image `make elevated-test` passes 13/13 in a VM (installer window on its own display with the real keyboard, a session program refused, Program Files + Start menu + Apps & features, Add someone else to this PC).**
 
 ADR 0012, bug B56. An elevated program runs as SYSTEM (`sgsystem`), and on
 the session's X server any session program could type into it (XTEST,
