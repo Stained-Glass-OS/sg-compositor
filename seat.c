@@ -324,7 +324,7 @@ handle_keybinding(struct cg_server *server, xkb_keysym_t sym)
  * intercept or fake it. Here that property comes from the compositor seeing
  * every key before any client does -- a client cannot grab these, cannot
  * swallow them, and, since input injection is privileged, cannot synthesise
- * them either. Today both lock; Ctrl+Alt+Del will grow a security screen.
+ * them either. Win+L locks; Ctrl+Alt+Del puts up the security screen.
  *
  * A consumed press must take its release with it, or the focused client gets
  * a release for a key it never saw pressed -- and learns a reserved key was
@@ -362,8 +362,13 @@ handle_reserved_key(struct cg_seat *seat, uint32_t modifiers, const xkb_keysym_t
 		bool win_l = (modifiers & WLR_MODIFIER_LOGO) && (syms[i] == XKB_KEY_l || syms[i] == XKB_KEY_L);
 		bool sas = (modifiers & WLR_MODIFIER_CTRL) && (modifiers & WLR_MODIFIER_ALT) &&
 			   (syms[i] == XKB_KEY_Delete || syms[i] == XKB_KEY_KP_Delete);
-		if (win_l || sas) {
+		if (win_l) {
 			lock_engage(&seat->server->lock);
+			return true;
+		}
+		if (sas) {
+			/* the security screen; over a lock or a prompt, nothing */
+			lock_sas_engage(&seat->server->lock);
 			return true;
 		}
 	}

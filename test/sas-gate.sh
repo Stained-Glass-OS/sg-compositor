@@ -1,8 +1,11 @@
 #!/bin/sh
 # Reserved keys: Win+L and the secure attention sequence (Ctrl+Alt+Del).
 #
-# Both must lock, and neither may reach any client -- not the press, and not
-# the release either, which would tell the client a reserved key was used.
+# Win+L locks. Ctrl+Alt+Del puts up the security screen when a lock service
+# is watching (SAS cancel / taskmgr / signout end it, the last two run in the
+# session; Lock turns it into a lock), and locks when none is. Neither may
+# reach any client -- not the press, and not the release either, which would
+# tell the client a reserved key was used.
 # Ordinary keys must still arrive, or "nothing reached the client" proves
 # nothing.
 set -u
@@ -17,7 +20,8 @@ pass() { echo "PASS  $*"; }
 fail() { echo "FAIL  $*"; RC=1; }
 for t in wtype xev xdotool python3; do command -v "$t" >/dev/null || { echo "SKIP: $t missing"; exit 77; }; done
 
-WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 WLR_RENDERER=pixman \
+printf '#!/bin/sh\necho "$1 $WAYLAND_DISPLAY" >> %s/actions\n' "$T" > "$T/sas-action"; chmod 755 "$T/sas-action"
+SG_SAS_ACTION="$T/sas-action" WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 WLR_RENDERER=pixman \
     "$COMP" -L "$T/priv.sock" -C "$T/ctl.sock" -U "$(id -u)" -- \
     sh -c "echo \$DISPLAY > $T/xd; exec xev -event keyboard" >"$T/xev.txt" 2>"$T/log" &
 CP=$!
@@ -49,8 +53,39 @@ inj -M logo l -m logo
 ctl UNLOCK >/dev/null; focus
 
 inj -M ctrl -M alt -k Delete -m alt -m ctrl
-[ "$(ctl STATUS)" = "OK locked" ] && pass "Ctrl+Alt+Del locks" || fail "Ctrl+Alt+Del did not lock"
+[ "$(ctl STATUS)" = "OK locked" ] && pass "Ctrl+Alt+Del with no lock service watching locks" || fail "Ctrl+Alt+Del did not lock"
 ctl UNLOCK >/dev/null; focus
+
+# With a lock service watching: the security screen.
+python3 -c "
+import socket, sys
+s = socket.socket(socket.AF_UNIX); s.connect('$T/ctl.sock'); s.sendall(b'WATCH\n')
+f = s.makefile()
+while True:
+    l = f.readline()
+    if not l: break
+    open('$T/events', 'a').write(l)
+" & WP=$!
+sleep 1
+inj -M ctrl -M alt -k Delete -m alt -m ctrl
+grep -qx sas "$T/events" && [ "$(ctl STATUS)" = "OK locked" ] && pass "Ctrl+Alt+Del puts up the security screen (the watcher is told sas; the session is isolated)" \
+    || fail "no security screen: $(tr '\n' ' ' < "$T/events")"
+[ "$(ctl 'SAS bogus')" = "ERR not on the security screen" ] && pass "an unknown choice is refused" || fail "SAS bogus accepted"
+[ "$(ctl 'SAS cancel')" = "OK unlocked" ] && [ "$(ctl STATUS)" = "OK unlocked" ] && pass "Cancel ends it" || fail "SAS cancel"
+[ "$(ctl 'SAS cancel')" = "ERR not on the security screen" ] && pass "SAS does nothing off the security screen (it is no unlock)" || fail "SAS worked off the screen"
+ctl LOCK >/dev/null
+[ "$(ctl 'SAS cancel')" = "ERR not on the security screen" ] && [ "$(ctl STATUS)" = "OK locked" ] \
+    && pass "and over a real lock it unlocks nothing" || fail "SAS cancel unlocked a lock"
+ctl UNLOCK >/dev/null; focus
+inj -M ctrl -M alt -k Delete -m alt -m ctrl
+ctl 'SAS taskmgr' >/dev/null; sleep 1
+grep -q '^taskmgr wayland-' "$T/actions" 2>/dev/null && [ "$(ctl STATUS)" = "OK unlocked" ] \
+    && pass "Task Manager ends it and runs in the session (with its display)" || fail "taskmgr: $(cat "$T/actions" 2>/dev/null)"
+inj -M ctrl -M alt -k Delete -m alt -m ctrl
+ctl LOCK >/dev/null; sleep 0.5
+[ "$(ctl STATUS)" = "OK locked" ] && grep -qx locked "$T/events" && pass "Lock turns it into a lock" || fail "Lock from the security screen"
+ctl UNLOCK >/dev/null; focus
+kill "$WP" 2>/dev/null
 
 inj c
 presses | grep -qx c && pass "input resumes after unlock" || fail "input did not resume after unlock"

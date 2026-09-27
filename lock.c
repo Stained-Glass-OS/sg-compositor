@@ -34,6 +34,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #include <wayland-server-core.h>
 #include <wlr/backend/headless.h>
@@ -314,7 +315,7 @@ adopt_remote_client(struct cg_lock *lock, int fd)
 	return true;
 }
 
-/* One command per connection: LOCK, UNLOCK, SECURE, RELEASE, WATCH, STATUS,
+/* One command per connection: LOCK, UNLOCK, SECURE, RELEASE, SAS <action>, WATCH, STATUS,
  * REMOTE (optionally with the remote connection's fd) or LOCAL. */
 static int
 handle_control_connection(int fd, uint32_t mask, void *data)
@@ -415,6 +416,15 @@ handle_control_connection(int fd, uint32_t mask, void *data)
 			reply = "OK secure\n";
 		} else {
 			reply = "ERR locked\n";
+		}
+	} else if (!strncmp(buf, "SAS ", 4)) {
+		if (!uid_may_unlock(lock, uid)) {
+			AUDIT("refused SAS from uid %d", (int) uid);
+			reply = "ERR not permitted\n";
+		} else if (lock_sas_action(lock, buf + 4)) {
+			reply = "OK unlocked\n";
+		} else {
+			reply = "ERR not on the security screen\n";
 		}
 	} else if (!strcmp(buf, "RELEASE")) {
 		if (!uid_may_unlock(lock, uid)) {
@@ -572,6 +582,13 @@ isolate(struct cg_lock *lock, const char *event)
 void
 lock_engage(struct cg_lock *lock)
 {
+	if (lock->locked && lock->sas) {
+		/* Lock, chosen on the security screen (or Win+L over it). */
+		lock->sas = false;
+		AUDIT("locked (from the security screen)");
+		notify_watchers(lock, "locked\n");
+		return;
+	}
 	if (lock->locked && lock->secure) {
 		/* Locked during a secure prompt: it becomes a real lock. The
 		 * prompt's own view stays visible (it is privileged); the lock
@@ -608,6 +625,7 @@ unisolate(struct cg_lock *lock, const char *event)
 
 	lock->locked = false;
 	lock->secure = false;
+	lock->sas = false;
 	notify_watchers(lock, event);
 
 	wlr_seat_keyboard_notify_clear_focus(server->seat->seat);
@@ -631,6 +649,71 @@ lock_release(struct cg_lock *lock)
 	}
 	AUDIT("unlocked");
 	unisolate(lock, "unlocked\n");
+}
+
+/* Ctrl+Alt+Del: the security screen. With no lock service watching there is
+ * no one to draw it, so it locks, as it always did. */
+bool
+lock_sas_engage(struct cg_lock *lock)
+{
+	if (lock->locked) {
+		return false;
+	}
+	if (wl_list_empty(&lock->watchers)) {
+		lock_engage(lock);
+		return true;
+	}
+	lock->sas = true;
+	AUDIT("security screen");
+	isolate(lock, "sas\n");
+	return true;
+}
+
+/* Runs a security-screen choice in the session: this process is the session
+ * user's, with its display and environment. Double fork: the helper is not
+ * this compositor's child, whose exit status belongs to the session. */
+static void
+run_sas_helper(const char *action)
+{
+	const char *helper = getenv("SG_SAS_ACTION");
+	pid_t pid;
+
+	if (!helper || helper[0] != '/') {
+		helper = "/usr/lib/stained-glass/sg-sas-action";
+	}
+	if ((pid = fork()) < 0) {
+		return;
+	}
+	if (pid == 0) {
+		if (fork() == 0) {
+			setsid();
+			closefrom(3); /* none of the compositor's descriptors */
+			execl(helper, helper, action, (char *) NULL);
+			_exit(127);
+		}
+		_exit(0);
+	}
+	waitpid(pid, NULL, 0);
+}
+
+/* SAS <action>, from the lock service: cancel, taskmgr or signout end the
+ * security screen (the last two then run in the session). Lock goes through
+ * LOCK. */
+bool
+lock_sas_action(struct cg_lock *lock, const char *action)
+{
+	if (!lock->locked || !lock->sas) {
+		return false;
+	}
+	if (strcmp(action, "cancel") && strcmp(action, "taskmgr") && strcmp(action, "signout")) {
+		return false;
+	}
+	AUDIT("security screen: %s", action);
+	unisolate(lock, "unlocked\n");
+	if (strcmp(action, "cancel")) {
+		run_sas_helper(action);
+	}
+	return true;
 }
 
 void

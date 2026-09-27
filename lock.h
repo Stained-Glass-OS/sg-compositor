@@ -23,6 +23,10 @@ struct cg_lock {
 	 * and RELEASE -- not UNLOCK -- ends it. A LOCK while secure turns it
 	 * into a real lock, which RELEASE will then not undo. */
 	bool secure;
+	/* sg-compositor: the security screen (Ctrl+Alt+Del): isolated as for a
+	 * lock, watchers told "sas"; SAS <action> ends it (Lock turns it into a
+	 * real lock). */
+	bool sas;
 
 	/* Who may unlock and who may connect on the privileged socket: the
 	 * machine session's account (sgsystem) and root. Taken from the kernel
@@ -74,5 +78,7 @@ void remote_detach(struct cg_server *server, const char *why);
 void lock_release(struct cg_lock *lock);
 bool lock_secure_engage(struct cg_lock *lock);
 void lock_secure_release(struct cg_lock *lock);
+bool lock_sas_engage(struct cg_lock *lock);
+bool lock_sas_action(struct cg_lock *lock, const char *action);
 
 #endif
