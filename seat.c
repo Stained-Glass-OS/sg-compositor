@@ -119,7 +119,9 @@ press_cursor_button(struct cg_seat *seat, struct wlr_input_device *device, uint3
 
 		/* Focus that client if the button was pressed and
 		   it has no open dialogs. */
-		if (view && !view_is_transient_for(current, view)) {
+		/* sg-compositor: nothing may have the focus (the popup that had
+		   it is gone) -- a click then focuses what it lands on. */
+		if (view && (!current || !view_is_transient_for(current, view))) {
 			seat_set_focus(seat, view);
 		}
 	}

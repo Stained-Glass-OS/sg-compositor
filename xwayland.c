@@ -9,6 +9,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <wayland-server-core.h>
+#include <wlr/types/wlr_scene.h>
 #include <wlr/util/log.h>
 #include <wlr/xwayland.h>
 
@@ -111,12 +112,30 @@ handle_xwayland_surface_request_fullscreen(struct wl_listener *listener, void *d
 	wlr_xwayland_surface_set_fullscreen(xwayland_view->xwayland_surface, xwayland_surface->fullscreen);
 }
 
+/* sg-compositor: an override-redirect window moves itself; follow it. */
+static void
+handle_or_set_geometry(struct wl_listener *listener, void *data)
+{
+	struct cg_xwayland_view *xwayland_view = wl_container_of(listener, xwayland_view, set_geometry);
+	struct cg_view *view = &xwayland_view->view;
+
+	view->lx = xwayland_view->xwayland_surface->x;
+	view->ly = xwayland_view->xwayland_surface->y;
+	if (view->scene_tree) {
+		wlr_scene_node_set_position(&view->scene_tree->node, view->lx, view->ly);
+	}
+}
+
 static void
 handle_xwayland_surface_unmap(struct wl_listener *listener, void *data)
 {
 	struct cg_xwayland_view *xwayland_view = wl_container_of(listener, xwayland_view, unmap);
 	struct cg_view *view = &xwayland_view->view;
 
+	if (xwayland_view->or_geometry) {
+		wl_list_remove(&xwayland_view->set_geometry.link);
+		xwayland_view->or_geometry = false;
+	}
 	view_unmap(view);
 }
 
@@ -129,6 +148,11 @@ handle_xwayland_surface_map(struct wl_listener *listener, void *data)
 	if (!xwayland_view_should_manage(view)) {
 		view->lx = xwayland_view->xwayland_surface->x;
 		view->ly = xwayland_view->xwayland_surface->y;
+		if (!view->elevated && !xwayland_view->or_geometry) {
+			xwayland_view->set_geometry.notify = handle_or_set_geometry;
+			wl_signal_add(&xwayland_view->xwayland_surface->events.set_geometry, &xwayland_view->set_geometry);
+			xwayland_view->or_geometry = true;
+		}
 	}
 
 	view_map(view, xwayland_view->xwayland_surface->surface);
@@ -140,6 +164,10 @@ handle_xwayland_surface_destroy(struct wl_listener *listener, void *data)
 	struct cg_xwayland_view *xwayland_view = wl_container_of(listener, xwayland_view, destroy);
 	struct cg_view *view = &xwayland_view->view;
 
+	if (xwayland_view->or_geometry) {
+		wl_list_remove(&xwayland_view->set_geometry.link);
+		xwayland_view->or_geometry = false;
+	}
 	wl_list_remove(&xwayland_view->destroy.link);
 	wl_list_remove(&xwayland_view->request_fullscreen.link);
 	if (view->elevated) {

@@ -25,6 +25,8 @@ struct cg_xwayland_view {
 	struct wl_listener request_maximize;
 	struct wl_listener request_activate;
 	struct wl_listener set_geometry;
+	/* sg-compositor: set_geometry is followed for an override-redirect window */
+	bool or_geometry;
 };
 
 struct cg_xwayland_view *xwayland_view_from_view(struct cg_view *view);

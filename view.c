@@ -193,22 +193,29 @@ view_map(struct cg_view *view, struct wlr_surface *surface)
 	}
 	view->scene_tree->node.data = view;
 
+	bool unmanaged = false;
+#if CAGE_HAS_XWAYLAND
+	unmanaged = view->type == CAGE_XWAYLAND_VIEW && !xwayland_view_should_manage(view);
+#endif
 	if (view->elevated) {
 		elevated_view_mapped(view);
-	} else
-#if CAGE_HAS_XWAYLAND
-		/* We shouldn't position override-redirect windows. They set
-		   their own (x,y) coordinates in handle_wayland_surface_map. */
-		if (view->type != CAGE_XWAYLAND_VIEW || xwayland_view_should_manage(view))
-#endif
-	{
+	} else if (unmanaged) {
+		/* sg-compositor: override-redirect windows (a combo box's list,
+		   menus, tooltips) go where X put them. */
+		wlr_scene_node_set_position(&view->scene_tree->node, view->lx, view->ly);
+	} else {
 		view_position(view);
 	}
 
 	wl_list_insert(&server->views, &view->link);
 	/* sg-compositor: a window opened during a lock stays hidden. */
 	lock_view_mapped(&server->lock, view);
-	seat_set_focus(server->seat, view);
+	/* sg-compositor: and they never take the focus. The program keeps it --
+	   Wine closes a combo box's list as soon as its window loses it, and
+	   the list that took it left nothing focused once it closed. */
+	if (!unmanaged) {
+		seat_set_focus(server->seat, view);
+	}
 }
 
 void

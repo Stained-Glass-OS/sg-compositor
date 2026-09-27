@@ -2,7 +2,7 @@
 BUILD ?= build
 SG_SESSION ?= ../sg-session
 
-.PHONY: all build test test-session test-lock test-privileged test-sas test-power test-elevated clean deb install
+.PHONY: all build test test-session test-lock test-privileged test-sas test-power test-elevated test-popup clean deb install
 
 all: build
 
@@ -18,7 +18,7 @@ install: build
 # The gate is sg-session's own session gate, run with this compositor hosting
 # the session instead of cage. Milestone 1 of ADR 0011 is exactly "that still
 # passes", so the gate is the same one, not a new one.
-test: test-session test-lock test-secure test-privileged test-sas test-power test-elevated
+test: test-session test-lock test-secure test-privileged test-sas test-power test-elevated test-popup
 
 test-session: build
 	@[ -d "$(SG_SESSION)" ] || { echo "sg-session checkout not found at $(SG_SESSION)"; exit 2; }
@@ -60,3 +60,9 @@ test-power: build
 test-elevated: build
 	@$(MAKE) -C $(SG_SESSION) procagent vkbd >/dev/null
 	@SG_SESSION=$(SG_SESSION) sh test/elevated-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc
+
+# Override-redirect windows: Setup's combo-box lists open, stay open, and a
+# click after one closes does not crash the compositor. Needs wine-sg and
+# mingw; 77 = skipped.
+test-popup: build
+	@sh test/popup-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc
