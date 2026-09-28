@@ -86,6 +86,9 @@ activate(struct cg_view *view, bool activate)
 {
 	struct cg_xwayland_view *xwayland_view = xwayland_view_from_view(view);
 	wlr_xwayland_surface_activate(xwayland_view->xwayland_surface, activate);
+	/* sg-compositor: the window activated is on top for X too (clicks) */
+	if (activate && !view->elevated && !xwayland_view->xwayland_surface->override_redirect)
+		wlr_xwayland_surface_restack(xwayland_view->xwayland_surface, NULL, XCB_STACK_MODE_ABOVE);
 }
 
 static void
@@ -176,6 +179,17 @@ handle_xwayland_surface_map(struct wl_listener *listener, void *data)
 	}
 
 	view_map(view, xwayland_view->xwayland_surface->surface);
+
+	/* sg-compositor: a managed window is where the compositor put it, in X
+	 * too, and above the others there: X picks the window a click goes to by
+	 * its own idea of positions and stacking. Centred only on screen, xev
+	 * and sdl-freerdp's dialogs were still at 0,0 under the full-screen Wine
+	 * desktop for X, and every click went to Wine. */
+	if (xwayland_view_should_manage(view) && !view->elevated) {
+		struct wlr_xwayland_surface *xs = xwayland_view->xwayland_surface;
+		wlr_xwayland_surface_configure(xs, view->lx, view->ly, xs->width, xs->height);
+		wlr_xwayland_surface_restack(xs, NULL, XCB_STACK_MODE_ABOVE);
+	}
 }
 
 static void

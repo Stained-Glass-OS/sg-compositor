@@ -4,7 +4,13 @@ sg-compositor (0.2.0+sg10) unstable; urgency=medium
     instead of filling the screen -- and its ConfigureRequest is answered:
     xterm maps at 1x1 and then asks for its real size, and stayed a dot.
     For sg-shell's Linux Terminal (Administrator). Wine's windows are
-    override-redirect and are not affected. Gate: make test-xfloat.
+    override-redirect and are not affected.
+  * Clicks reach a Linux program's X11 window: X picks the window a click
+    goes to by its own idea of positions and stacking, which still had
+    the window at 0,0 under the full-screen Wine desktop. The compositor
+    now tells X where it placed the window and raises it there. Remote
+    Desktop's certificate dialog (sdl-freerdp) could not be accepted: its
+    buttons never got the click. Gate: make test-xfloat.
 
  -- Stained Glass OS <ke7oxh@gmail.com>  Mon, 28 Sep 2026 18:00:00 -0700
 
