@@ -1,3 +1,14 @@
+sg-compositor (0.2.0+sg11) unstable; urgency=medium
+
+  * Any program in the session may set the display resolution through
+    wlr-output-management, as ChangeDisplaySettings allows elsewhere: the
+    global was privileged-only, so Display settings fell back to Xwayland's
+    list, which stops at the current mode -- a VM at 1024x768 could never go
+    higher. Refused while the machine is locked (unless the lock screen asks)
+    and for a layout with every display off. privileged-gate checks all four.
+
+ -- David Hamner <ke7oxh@gmail.com>  Mon, 28 Sep 2026 14:35:27 -0700
+
 sg-compositor (0.2.0+sg10) unstable; urgency=medium
 
   * An X11 window of a Linux program keeps the size it asks for, centred,

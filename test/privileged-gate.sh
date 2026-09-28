@@ -3,6 +3,8 @@
 #
 # Screen capture and input injection exist only for privileged clients, and
 # who is privileged is decided by the kernel's SO_PEERCRED, not by the client.
+# Output management is the exception: every program may set the resolution
+# (Display settings does), but not while locked and never all displays off.
 set -u
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 COMP="${SG_COMPOSITOR_BIN:-$HERE/build/sg-compositor}"
@@ -22,12 +24,35 @@ CP=$!
 _w=0; while [ ! -s "$T/d" ] && [ $_w -lt 50 ]; do sleep 0.2; _w=$((_w+1)); done
 D=$(cat "$T/d")
 
-SENS='zwlr_screencopy_manager_v1|zwlr_export_dmabuf_manager_v1|zwp_virtual_keyboard_manager_v1|zwlr_virtual_pointer_manager_v1|zwlr_output_manager_v1|zwlr_gamma_control_manager_v1'
+SENS='zwlr_screencopy_manager_v1|zwlr_export_dmabuf_manager_v1|zwp_virtual_keyboard_manager_v1|zwlr_virtual_pointer_manager_v1|zwlr_gamma_control_manager_v1'
 n=$(WAYLAND_DISPLAY="$D" wayland-info 2>/dev/null | grep -cE "$SENS")
-[ "$n" -eq 0 ] && pass "an ordinary client is offered none of the six sensitive protocols" \
+[ "$n" -eq 0 ] && pass "an ordinary client is offered none of the five sensitive protocols" \
                || fail "an ordinary client is offered $n sensitive protocols"
 n=$(WAYLAND_DISPLAY="$T/priv.sock" wayland-info 2>/dev/null | grep -oE "$SENS" | sort -u | wc -l)
-[ "$n" -eq 6 ] && pass "a privileged client is offered all six" || fail "a privileged client is offered $n of six"
+[ "$n" -eq 5 ] && pass "a privileged client is offered all five" || fail "a privileged client is offered $n of five"
+
+# Resolution: any client may, as Display settings does.
+if command -v wlr-randr >/dev/null; then
+    O=$(WAYLAND_DISPLAY="$D" wlr-randr 2>/dev/null | awk 'NR==1{print $1}')
+    WAYLAND_DISPLAY="$D" wlr-randr --output "$O" --custom-mode 1600x900 >/dev/null 2>&1
+    WAYLAND_DISPLAY="$D" wlr-randr 2>/dev/null | grep -q '1600x900.*current' \
+        && pass "an ordinary client can set the resolution" || fail "an ordinary client could not set the resolution"
+    WAYLAND_DISPLAY="$D" wlr-randr --output "$O" --off >/dev/null 2>&1
+    WAYLAND_DISPLAY="$D" wlr-randr 2>/dev/null | grep -q 'Enabled: yes' \
+        && pass "but not turn every display off" || fail "an ordinary client turned every display off"
+    python3 -c 'import socket, sys
+s = socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); s.sendall(b"LOCK\n"); s.recv(64)' "$T/ctl.sock"
+    WAYLAND_DISPLAY="$D" wlr-randr --output "$O" --custom-mode 1024x768 >/dev/null 2>&1
+    WAYLAND_DISPLAY="$D" wlr-randr 2>/dev/null | grep -q '1600x900.*current' \
+        && pass "nor change it while the machine is locked" || fail "an ordinary client changed the resolution while locked"
+    WAYLAND_DISPLAY="$T/priv.sock" wlr-randr --output "$O" --custom-mode 1280x720 >/dev/null 2>&1
+    WAYLAND_DISPLAY="$T/priv.sock" wlr-randr 2>/dev/null | grep -q '1280x720.*current' \
+        && pass "the lock screen still can" || fail "a privileged client could not set the resolution while locked"
+    python3 -c 'import socket, sys
+s = socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); s.sendall(b"UNLOCK\n"); s.recv(64)' "$T/ctl.sock"
+else
+    echo "info  wlr-randr missing: resolution checks skipped"
+fi
 
 WAYLAND_DISPLAY="$D" grim "$T/o.png" >/dev/null 2>&1
 [ -s "$T/o.png" ] && fail "an ordinary client captured the screen" || pass "an ordinary client cannot capture the screen"

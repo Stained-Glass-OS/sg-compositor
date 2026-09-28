@@ -431,6 +431,25 @@ static bool
 output_config_apply(struct cg_server *server, struct wlr_output_configuration_v1 *config, bool test_only)
 {
 	struct wlr_output_configuration_head_v1 *head;
+	bool any_enabled = false;
+
+	/* Every program in the session may set the resolution, as
+	 * ChangeDisplaySettings lets any program elsewhere -- that is what the
+	 * Display settings page does. But not while the machine is locked, unless
+	 * it is the lock screen asking, and never a layout with every display
+	 * off: an ordinary program must not be able to blank the lock screen. */
+	if (server->lock.locked) {
+		struct wl_client *client = config->resource ? wl_resource_get_client(config->resource) : NULL;
+		if (!client || !lock_client_is_privileged(&server->lock, client)) {
+			return false;
+		}
+	}
+	wl_list_for_each (head, &config->heads, link) {
+		any_enabled |= head->state.enabled;
+	}
+	if (!any_enabled) {
+		return false;
+	}
 
 	wl_list_for_each (head, &config->heads, link) {
 		struct cg_output *output = head->state.output->data;

@@ -544,7 +544,7 @@ main(int argc, char *argv[])
 		ret = 1;
 		goto end;
 	}
-	lock_restrict_global(&server.lock, server.output_manager_v1->global);
+	/* Not restricted: output_config_apply() refuses changes while locked. */
 	server.output_manager_apply.notify = handle_output_manager_apply;
 	wl_signal_add(&server.output_manager_v1->events.apply, &server.output_manager_apply);
 	server.output_manager_test.notify = handle_output_manager_test;
