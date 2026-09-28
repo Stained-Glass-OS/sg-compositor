@@ -35,6 +35,7 @@
 #include <wlr/util/log.h>
 #include <wlr/util/region.h>
 
+#include "backdrop.h"
 #include "output.h"
 #include "seat.h"
 #include "server.h"
@@ -67,6 +68,7 @@ update_output_manager_config(struct cg_server *server)
 	}
 
 	wlr_output_manager_v1_set_configuration(server->output_manager_v1, config);
+	backdrop_update(server);
 }
 
 static inline void

@@ -2,7 +2,7 @@
 BUILD ?= build
 SG_SESSION ?= ../sg-session
 
-.PHONY: all build test test-session test-lock test-privileged test-sas test-power test-elevated test-popup clean deb install
+.PHONY: all build test test-session test-lock test-privileged test-sas test-power test-elevated test-popup test-backdrop clean deb install
 
 all: build
 
@@ -18,7 +18,7 @@ install: build
 # The gate is sg-session's own session gate, run with this compositor hosting
 # the session instead of cage. Milestone 1 of ADR 0011 is exactly "that still
 # passes", so the gate is the same one, not a new one.
-test: test-session test-lock test-secure test-privileged test-sas test-power test-elevated test-popup
+test: test-session test-lock test-secure test-privileged test-sas test-power test-elevated test-popup test-backdrop
 
 test-session: build
 	@[ -d "$(SG_SESSION)" ] || { echo "sg-session checkout not found at $(SG_SESSION)"; exit 2; }
@@ -66,3 +66,7 @@ test-elevated: build
 # mingw; 77 = skipped.
 test-popup: build
 	@sh test/popup-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc
+
+# The backdrop: where no window is, colour and picture, not black.
+test-backdrop: build
+	@SG_COMPOSITOR_BIN=$(CURDIR)/$(BUILD)/sg-compositor sh test/backdrop-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc

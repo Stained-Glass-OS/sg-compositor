@@ -56,6 +56,7 @@
 
 #include "elevated.h"
 #include "idle_inhibit_v1.h"
+#include "backdrop.h"
 #include "output.h"
 #include "seat.h"
 #include "server.h"
@@ -397,6 +398,7 @@ main(int argc, char *argv[])
 	server.scene_output_layout = wlr_scene_attach_output_layout(server.scene, server.output_layout);
 
 	/* sg-compositor: stacking layers, bottom to top (see server.h). */
+	backdrop_init(&server);
 	server.normal_tree = wlr_scene_tree_create(&server.scene->tree);
 	server.elevated_tree = wlr_scene_tree_create(&server.scene->tree);
 	server.privileged_tree = wlr_scene_tree_create(&server.scene->tree);

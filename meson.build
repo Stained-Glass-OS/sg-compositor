@@ -113,6 +113,7 @@ if scdoc.found()
 endif
 
 cage_sources = [
+  'backdrop.c',
   'lock.c',
   'elevated.c',
   'cage.c',
@@ -124,6 +125,7 @@ cage_sources = [
 ]
 
 cage_headers = [
+  'backdrop.h',
   configure_file(input: 'config.h.in',
                  output: 'config.h',
                  configuration: conf_data),

@@ -88,6 +88,7 @@ struct cg_server {
 	 * session window can cover -- and privileged views (lock screen, consent
 	 * prompt) on top of everything. */
 	struct wl_list elevated; /* cg_elevated::link */
+	struct wlr_scene_tree *backdrop_tree; /* beneath everything: backdrop.c */
 	struct wlr_scene_tree *normal_tree;
 	struct wlr_scene_tree *elevated_tree;
 	struct wlr_scene_tree *privileged_tree;
