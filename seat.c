@@ -35,6 +35,7 @@
 #include <wlr/xwayland.h>
 #endif
 
+#include "decor.h"
 #include "elevated.h"
 #include "output.h"
 #include "seat.h"
@@ -770,6 +771,14 @@ handle_cursor_button(struct wl_listener *listener, void *data)
 		return;
 	}
 
+	/* sg-compositor: a click on a Linux program's title bar is the
+	 * compositor's (decor.c), not the window's */
+#if CAGE_HAS_XWAYLAND
+	if (decor_button(seat, event->state == WL_POINTER_BUTTON_STATE_PRESSED, event->time_msec)) {
+		seat_notify_activity(seat->server);
+		return;
+	}
+#endif
 	elevated_grab_button(seat, event->state == WL_POINTER_BUTTON_STATE_PRESSED);
 	if (event->state == WL_POINTER_BUTTON_STATE_PRESSED) {
 		/* sg-compositor: a click on an elevated window, like a key, lets
@@ -798,6 +807,13 @@ process_cursor_motion(struct cg_seat *seat, uint32_t time_msec, double dx, doubl
 		seat_notify_activity(seat->server);
 		return;
 	}
+	/* and a title bar being dragged takes it too */
+#if CAGE_HAS_XWAYLAND
+	if (decor_motion(seat, seat->cursor->x, seat->cursor->y)) {
+		seat_notify_activity(seat->server);
+		return;
+	}
+#endif
 
 	struct cg_view *view = desktop_view_at(seat->server, seat->cursor->x, seat->cursor->y, &surface, &sx, &sy);
 	if (!view) {

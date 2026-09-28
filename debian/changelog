@@ -6,6 +6,14 @@ sg-compositor (0.2.0+sg11) unstable; urgency=medium
     list, which stops at the current mode -- a VM at 1024x768 could never go
     higher. Refused while the machine is locked (unless the lock screen asks)
     and for a layout with every display off. privileged-gate checks all four.
+  * A Linux program's X11 window -- the Linux Terminal (Administrator)'s
+    xterm, the RDP client's dialogs -- has a title bar, as Windows 10 draws
+    one (decor.c): its title, Maximize/Restore and Close (red under the
+    pointer), a one-pixel border. Dragging the bar moves the window,
+    double-clicking it maximizes; Close sends WM_DELETE_WINDOW. Not for
+    Wine's (override-redirect) or elevated windows, full-screen ones, or
+    those that ask for no decorations. Text by FreeType (Inter). Gate:
+    test/decor-gate.sh (mutation-tested).
 
  -- David Hamner <ke7oxh@gmail.com>  Mon, 28 Sep 2026 14:35:27 -0700
 

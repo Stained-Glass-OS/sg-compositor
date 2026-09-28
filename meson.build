@@ -38,6 +38,8 @@ endif
 wlroots        = dependency('wlroots-0.18', fallback: ['wlroots', 'wlroots'])
 wayland_protos = dependency('wayland-protocols', version: '>=1.14')
 wayland_server = dependency('wayland-server')
+# sg-compositor: title bars' text (decor.c)
+freetype       = dependency('freetype2')
 xkbcommon      = dependency('xkbcommon')
 math           = cc.find_library('m')
 
@@ -139,8 +141,8 @@ cage_headers = [
 ]
 
 if conf_data.get('CAGE_HAS_XWAYLAND', 0) == 1
-  cage_sources += 'xwayland.c'
-  cage_headers += 'xwayland.h'
+  cage_sources += ['xwayland.c', 'decor.c']
+  cage_headers += ['xwayland.h', 'decor.h']
 endif
 
 executable(
@@ -151,6 +153,7 @@ executable(
     wayland_server,
     wlroots,
     xkbcommon,
+    freetype,
     math,
   ],
   install: true,

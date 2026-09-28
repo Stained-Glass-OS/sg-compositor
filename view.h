@@ -41,6 +41,11 @@ struct cg_view {
 	bool minimized;
 	bool maximized;
 	struct wlr_box restore; /* geometry before maximising */
+	/* sg-compositor: a Linux program's window with the compositor's title
+	 * bar above it (decor.c), and one the user has moved or maximized
+	 * there -- no longer centred for it. */
+	bool decorated;
+	bool user_placed;
 	/* Position relative to the origin of the layout box it lives in, so it
 	 * follows the session to a Remote Desktop output and back. */
 	int rx, ry;

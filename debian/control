@@ -3,7 +3,8 @@ Section: x11
 Priority: optional
 Maintainer: Stained Glass OS <dev@stained-glass.example>
 Build-Depends: debhelper-compat (= 13), meson, ninja-build, pkgconf,
- libwlroots-0.18-dev, libwayland-dev, wayland-protocols, libxkbcommon-dev
+ libwlroots-0.18-dev, libwayland-dev, wayland-protocols, libxkbcommon-dev,
+ libfreetype-dev
 Standards-Version: 4.7.0
 Homepage: https://github.com/Stained-Glass-OS/sg-compositor
 Rules-Requires-Root: no

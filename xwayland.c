@@ -13,6 +13,7 @@
 #include <wlr/util/log.h>
 #include <wlr/xwayland.h>
 
+#include "decor.h"
 #include "elevated.h"
 #include "server.h"
 #include "view.h"
@@ -89,6 +90,7 @@ activate(struct cg_view *view, bool activate)
 	/* sg-compositor: the window activated is on top for X too (clicks) */
 	if (activate && !view->elevated && !xwayland_view->xwayland_surface->override_redirect)
 		wlr_xwayland_surface_restack(xwayland_view->xwayland_surface, NULL, XCB_STACK_MODE_ABOVE);
+	decor_set_active(view, activate);
 }
 
 static void
@@ -113,6 +115,7 @@ handle_xwayland_surface_request_fullscreen(struct wl_listener *listener, void *d
 	struct cg_xwayland_view *xwayland_view = wl_container_of(listener, xwayland_view, request_fullscreen);
 	struct wlr_xwayland_surface *xwayland_surface = xwayland_view->xwayland_surface;
 	wlr_xwayland_surface_set_fullscreen(xwayland_view->xwayland_surface, xwayland_surface->fullscreen);
+	decor_set_fullscreen(&xwayland_view->view, xwayland_surface->fullscreen);
 }
 
 /* sg-compositor: an override-redirect window moves itself; follow it. */
@@ -159,6 +162,7 @@ handle_xwayland_surface_unmap(struct wl_listener *listener, void *data)
 		wl_list_remove(&xwayland_view->set_geometry.link);
 		xwayland_view->or_geometry = false;
 	}
+	decor_destroy(view);
 	view_unmap(view);
 }
 
@@ -187,6 +191,12 @@ handle_xwayland_surface_map(struct wl_listener *listener, void *data)
 	 * desktop for X, and every click went to Wine. */
 	if (xwayland_view_should_manage(view) && !view->elevated) {
 		struct wlr_xwayland_surface *xs = xwayland_view->xwayland_surface;
+		/* a Linux program's window gets a title bar (decor.c), and is
+		 * centred with it */
+		decor_create(view);
+		if (view->decorated) {
+			view_position(view);
+		}
 		wlr_xwayland_surface_configure(xs, view->lx, view->ly, xs->width, xs->height);
 		wlr_xwayland_surface_restack(xs, NULL, XCB_STACK_MODE_ABOVE);
 	}
@@ -202,6 +212,7 @@ handle_xwayland_surface_destroy(struct wl_listener *listener, void *data)
 		wl_list_remove(&xwayland_view->set_geometry.link);
 		xwayland_view->or_geometry = false;
 	}
+	decor_destroy(view);
 	wl_list_remove(&xwayland_view->destroy.link);
 	wl_list_remove(&xwayland_view->request_fullscreen.link);
 	if (view->elevated) {

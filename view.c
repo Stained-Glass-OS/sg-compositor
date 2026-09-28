@@ -17,6 +17,7 @@
 #include <wlr/types/wlr_scene.h>
 #include <wlr/util/box.h>
 
+#include "decor.h"
 #include "elevated.h"
 #include "output.h"
 #include "seat.h"
@@ -84,6 +85,13 @@ view_center(struct cg_view *view, struct wlr_box *layout_box)
 
 	view->lx = layout_box->x + (layout_box->width - width) / 2;
 	view->ly = layout_box->y + (layout_box->height - height) / 2;
+	/* the title bar above it is part of what is centred */
+	if (view->decorated) {
+		view->ly = layout_box->y + (layout_box->height - height - DECOR_TITLE_H) / 2 + DECOR_TITLE_H;
+		if (view->ly < layout_box->y + DECOR_TITLE_H) {
+			view->ly = layout_box->y + DECOR_TITLE_H;
+		}
+	}
 
 	if (view->scene_tree) {
 		wlr_scene_node_set_position(&view->scene_tree->node, view->lx, view->ly);
@@ -137,6 +145,11 @@ view_position(struct cg_view *view)
 	 * wall of text across the whole screen. Wine's own windows place
 	 * themselves (override-redirect) and never come here. */
 #if CAGE_HAS_XWAYLAND
+	/* where the user put it with its title bar stays (the compositor does
+	 * not re-centre a window the user moved or maximized) */
+	if (view->type == CAGE_XWAYLAND_VIEW && view->user_placed) {
+		return;
+	}
 	if (view->type == CAGE_XWAYLAND_VIEW && !view_extends_output_layout(view, &layout_box)) {
 		view_center(view, &layout_box);
 		return;
