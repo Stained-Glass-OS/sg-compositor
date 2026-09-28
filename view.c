@@ -132,6 +132,16 @@ view_position(struct cg_view *view)
 	struct wlr_box layout_box;
 	view_layout_box(view, &layout_box);
 
+	/* sg-compositor: an X11 window of a Linux program (a terminal) keeps the
+	 * size it asks for, centred, when it fits: maximized, xterm opened as a
+	 * wall of text across the whole screen. Wine's own windows place
+	 * themselves (override-redirect) and never come here. */
+#if CAGE_HAS_XWAYLAND
+	if (view->type == CAGE_XWAYLAND_VIEW && !view_extends_output_layout(view, &layout_box)) {
+		view_center(view, &layout_box);
+		return;
+	}
+#endif
 	if (view_is_primary(view) || view_extends_output_layout(view, &layout_box)) {
 		view_maximize(view, &layout_box);
 	} else {

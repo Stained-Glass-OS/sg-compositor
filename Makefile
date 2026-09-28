@@ -70,3 +70,8 @@ test-popup: build
 # The backdrop: where no window is, colour and picture, not black.
 test-backdrop: build
 	@SG_COMPOSITOR_BIN=$(CURDIR)/$(BUILD)/sg-compositor sh test/backdrop-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc
+
+# An X11 window of a Linux program keeps the size it asks for, centred.
+.PHONY: test-xfloat
+test-xfloat: build
+	@SG_COMPOSITOR_BIN=$(CURDIR)/$(BUILD)/sg-compositor sh test/xfloat-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc

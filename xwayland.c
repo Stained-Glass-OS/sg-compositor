@@ -126,6 +126,26 @@ handle_or_set_geometry(struct wl_listener *listener, void *data)
 	}
 }
 
+/* sg-compositor: a managed X11 window of a Linux program (a terminal) gets
+ * the size it asks for, and stays centred -- xterm maps at 1x1 and then asks
+ * for its real size. Wine's windows are override-redirect and move
+ * themselves; an elevated display's windows have their own handler. */
+static void
+handle_xwayland_surface_request_configure(struct wl_listener *listener, void *data)
+{
+	struct cg_xwayland_view *xwayland_view = wl_container_of(listener, xwayland_view, request_configure);
+	struct wlr_xwayland_surface_configure_event *event = data;
+	struct cg_view *view = &xwayland_view->view;
+
+	wlr_xwayland_surface_configure(event->surface, event->x, event->y, event->width < 1 ? 1 : event->width,
+				       event->height < 1 ? 1 : event->height);
+	if (view->scene_tree) {
+		view_position(view);
+		wlr_xwayland_surface_configure(event->surface, view->lx, view->ly, event->surface->width,
+					       event->surface->height);
+	}
+}
+
 static void
 handle_xwayland_surface_unmap(struct wl_listener *listener, void *data)
 {
@@ -172,6 +192,8 @@ handle_xwayland_surface_destroy(struct wl_listener *listener, void *data)
 	wl_list_remove(&xwayland_view->request_fullscreen.link);
 	if (view->elevated) {
 		elevated_view_unlisten(xwayland_view);
+	} else {
+		wl_list_remove(&xwayland_view->request_configure.link);
 	}
 	xwayland_view->xwayland_surface = NULL;
 
@@ -233,6 +255,9 @@ xwayland_view_create(struct cg_server *server, struct wlr_xwayland_surface *xway
 	wl_signal_add(&xwayland_surface->events.request_fullscreen, &xwayland_view->request_fullscreen);
 	if (elevated) {
 		elevated_view_listen(xwayland_view);
+	} else {
+		xwayland_view->request_configure.notify = handle_xwayland_surface_request_configure;
+		wl_signal_add(&xwayland_surface->events.request_configure, &xwayland_view->request_configure);
 	}
 }
 
