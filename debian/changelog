@@ -6,6 +6,11 @@ sg-compositor (0.2.0+sg13) unstable; urgency=medium
     start -- the screen went black (QA: "black for 10 sec or so"). A lock
     and the security screen still hide every window. Gate:
     test/secure-dim-gate.sh.
+  * The session's own X11 programs' windows -- a Linux terminal -- for
+    Wine's taskbar, which saw only Wine's: the control socket's XWINDOWS
+    lists them (id, shown/minimized, focused, class, title; not a Wine
+    program's *.exe), XACTIVATE, XMINIMIZE and XCLOSE act on one. Gate:
+    test/xwindows-gate.sh.
 
  -- David Hamner <ke7oxh@gmail.com>  Tue, 29 Sep 2026 00:05:00 -0700
 

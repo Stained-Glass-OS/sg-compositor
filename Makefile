@@ -18,7 +18,7 @@ install: build
 # The gate is sg-session's own session gate, run with this compositor hosting
 # the session instead of cage. Milestone 1 of ADR 0011 is exactly "that still
 # passes", so the gate is the same one, not a new one.
-test: test-session test-lock test-secure test-secure-dim test-privileged test-sas test-power test-elevated test-popup test-backdrop test-xfloat test-decor
+test: test-session test-lock test-secure test-secure-dim test-xwindows test-privileged test-sas test-power test-elevated test-popup test-backdrop test-xfloat test-decor
 
 test-session: build
 	@[ -d "$(SG_SESSION)" ] || { echo "sg-session checkout not found at $(SG_SESSION)"; exit 2; }
@@ -45,6 +45,11 @@ test-secure: build
 .PHONY: test-secure-dim
 test-secure-dim: build
 	@SG_COMPOSITOR_BIN=$(CURDIR)/$(BUILD)/sg-compositor sh test/secure-dim-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc
+
+# The session's own X11 programs' windows, for Wine's taskbar.
+.PHONY: test-xwindows
+test-xwindows: build
+	@SG_COMPOSITOR_BIN=$(CURDIR)/$(BUILD)/sg-compositor sh test/xwindows-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc
 
 # Session-scoped privileged protocols (milestone 3).
 test-privileged: build

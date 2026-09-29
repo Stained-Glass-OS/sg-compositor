@@ -118,6 +118,7 @@ cage_sources = [
   'backdrop.c',
   'lock.c',
   'elevated.c',
+  'session_x11.c',
   'cage.c',
   'idle_inhibit_v1.c',
   'output.c',

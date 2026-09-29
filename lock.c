@@ -25,6 +25,7 @@
  */
 #define _GNU_SOURCE
 #include "lock.h"
+#include "session_x11.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -480,6 +481,31 @@ handle_control_connection(int fd, uint32_t mask, void *data)
 			reply = "OK\n";
 		} else {
 			reply = "ERR no such window\n";
+		}
+	} else if (!strcmp(buf, "XWINDOWS")) {
+		/* the session's own X11 programs' windows, for the taskbar */
+		static char list[8192];
+		if (!uid_may_lock(lock, uid)) {
+			reply = "ERR not permitted\n";
+		} else {
+			session_x11_list(lock->server, list, sizeof(list));
+			reply = list;
+		}
+	} else if (!strncmp(buf, "XACTIVATE ", 10) || !strncmp(buf, "XMINIMIZE ", 10) || !strncmp(buf, "XCLOSE ", 7)) {
+		unsigned long window = 0;
+		bool ok = false;
+		if (!uid_may_lock(lock, uid)) {
+			AUDIT("refused %.9s from uid %d", buf, (int) uid);
+			reply = "ERR not permitted\n";
+		} else {
+			if (buf[1] == 'A' && sscanf(buf + 10, "%lu", &window) == 1) {
+				ok = session_x11_activate(lock->server, window);
+			} else if (buf[1] == 'M' && sscanf(buf + 10, "%lu", &window) == 1) {
+				ok = session_x11_minimize(lock->server, window);
+			} else if (buf[1] == 'C' && sscanf(buf + 7, "%lu", &window) == 1) {
+				ok = session_x11_close(lock->server, window);
+			}
+			reply = ok ? "OK\n" : "ERR no such window\n";
 		}
 	} else if (!strcmp(buf, "WINDOWS")) {
 		static char list[8192];
