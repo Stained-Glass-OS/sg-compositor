@@ -40,7 +40,8 @@ for x in $(seq 0 2 "$W"); do [ "$(px "$x" "$CY")" = "255,255,255" ] && { XL=$x; 
 for x in $(seq "$XL" 2 "$W"); do [ "$(px "$x" "$CY")" != "255,255,255" ] && { XR=$x; break; }; done
 for y in $(seq "$CY" -1 0); do [ "$(px $((XR - 100)) "$y")" != "255,255,255" ] && { BT=$((y + 1)); break; }; done
 echo "      window $XL..$XR, bar from $BT"
-[ "$XL" -gt 0 ] && [ "$(px $((XR - 100)) $((BT - 1)))" = "170,170,170" ] && [ "$(px $((XR - 100)) $((BT + 16)))" = "255,255,255" ] \
+border=$(px $((XR - 100)) $((BT - 1)))
+[ "$XL" -gt 0 ] && { [ "$border" = "112,112,112" ] || [ "$border" = "170,170,170" ]; } && [ "$(px $((XR - 100)) $((BT + 16)))" = "255,255,255" ] \
     && [ $((CY - BT)) -gt 32 ] \
     && pass "a title bar is above the window, with a border" || fail "no bar: border $(px $((XR - 100)) $((BT - 1))) bar $(px $((XR - 100)) $((BT + 16)))"
 ink=0

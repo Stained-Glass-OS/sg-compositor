@@ -397,6 +397,8 @@ decor_create(struct cg_view *view)
 	}
 	d->width = view->wlr_surface->current.width;
 	d->height = view->wlr_surface->current.height;
+	/* the window may have been given the focus before its bar existed */
+	d->active = seat_get_focus(view->server->seat) == view;
 	d->commit.notify = handle_commit;
 	wl_signal_add(&view->wlr_surface->events.commit, &d->commit);
 	d->set_title.notify = handle_set_title;

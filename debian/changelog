@@ -5,6 +5,8 @@ sg-compositor (0.2.0+sg12) unstable; urgency=medium
     bar. Since sg11 centred X11 windows that fit, it stayed off the origin
     when Display settings changed the resolution (the VM, David). Gate:
     test/decor-gate.sh.
+  * A title bar starts active when its window already has the focus (the
+    Linux terminal's showed grey until clicked).
 
  -- David Hamner <ke7oxh@gmail.com>  Mon, 28 Sep 2026 18:58:25 -0700
 
