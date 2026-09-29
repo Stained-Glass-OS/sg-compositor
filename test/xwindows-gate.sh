@@ -50,6 +50,14 @@ set -- $(convert "$T/shown.png" -format "%w %h" info:); CX=$(($1 / 2)); CY=$(($2
 [ "$(px activated $CX $CY)" = "255,0,0" ] && ctl XWINDOWS | grep -q "^$ID shown focused" \
     && pass "XACTIVATE shows it again, focused" || fail "activated: $(px activated $CX $CY) $(ctl XWINDOWS | head -1)"
 [ "$(ctl "XACTIVATE 99999999")" = "ERR no such window" ] && pass "an unknown window: ERR" || fail "unknown window accepted"
+# sg-session's sg-lockctl carries them for the taskbar (SG_LOCKCTL, or ../sg-session/build)
+LC="${SG_LOCKCTL:-$HERE/../sg-session/build/sg-lockctl}"
+if [ -x "$LC" ]; then
+    SG_LOCK_CONTROL="$T/ctl.sock" "$LC" XWINDOWS | grep -q "^$ID shown" && SG_LOCK_CONTROL="$T/ctl.sock" "$LC" XMINIMIZE "$ID" >/dev/null \
+        && ctl XWINDOWS | grep -q "^$ID minimized" && SG_LOCK_CONTROL="$T/ctl.sock" "$LC" XACTIVATE "$ID" >/dev/null \
+        && pass "sg-lockctl carries XWINDOWS, XMINIMIZE and XACTIVATE" || fail "sg-lockctl: $(SG_LOCK_CONTROL="$T/ctl.sock" "$LC" XWINDOWS 2>&1 | head -2)"
+    SG_LOCK_CONTROL="$T/ctl.sock" "$LC" XACTIVATE "12x" >/dev/null 2>&1 && fail "sg-lockctl passed a non-number" || pass "sg-lockctl takes numbers only"
+fi
 [ "$(ctl "XCLOSE $ID")" = OK ] && sleep 2 || fail "XCLOSE refused"
 ctl XWINDOWS | grep -q "Linux Terminal" && fail "XCLOSE left the window" || pass "XCLOSE closes it (WM_DELETE_WINDOW)"
 
