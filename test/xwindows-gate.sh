@@ -57,6 +57,8 @@ if [ -x "$LC" ]; then
         && ctl XWINDOWS | grep -q "^$ID minimized" && SG_LOCK_CONTROL="$T/ctl.sock" "$LC" XACTIVATE "$ID" >/dev/null \
         && pass "sg-lockctl carries XWINDOWS, XMINIMIZE and XACTIVATE" || fail "sg-lockctl: $(SG_LOCK_CONTROL="$T/ctl.sock" "$LC" XWINDOWS 2>&1 | head -2)"
     SG_LOCK_CONTROL="$T/ctl.sock" "$LC" XACTIVATE "12x" >/dev/null 2>&1 && fail "sg-lockctl passed a non-number" || pass "sg-lockctl takes numbers only"
+    SG_LOCK_CONTROL="$T/ctl.sock" "$LC" XWINDOWS --out "$T/xlist" && grep -q "^$ID shown" "$T/xlist" && [ "$(tail -1 "$T/xlist")" = END ] \
+        && pass "sg-lockctl XWINDOWS --out writes the list to a file (Wine hands a native program no pipe)" || fail "--out: $(cat "$T/xlist" 2>&1)"
 fi
 [ "$(ctl "XCLOSE $ID")" = OK ] && sleep 2 || fail "XCLOSE refused"
 ctl XWINDOWS | grep -q "Linux Terminal" && fail "XCLOSE left the window" || pass "XCLOSE closes it (WM_DELETE_WINDOW)"
