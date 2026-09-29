@@ -145,6 +145,18 @@ view_position(struct cg_view *view)
 	 * wall of text across the whole screen. Wine's own windows place
 	 * themselves (override-redirect) and never come here. */
 #if CAGE_HAS_XWAYLAND
+	/* the session's shell -- Wine's desktop window, explorer's -- is the
+	 * screen: at its origin, whatever size Wine gives it. Centred like a
+	 * Linux program's window, it stayed at the old offset when the
+	 * resolution changed (David: Display settings in a VM). */
+	if (view->type == CAGE_XWAYLAND_VIEW && xwayland_view_is_shell_desktop(view)) {
+		view->lx = layout_box.x;
+		view->ly = layout_box.y;
+		if (view->scene_tree) {
+			wlr_scene_node_set_position(&view->scene_tree->node, view->lx, view->ly);
+		}
+		return;
+	}
 	/* where the user put it with its title bar stays (the compositor does
 	 * not re-centre a window the user moved or maximized) */
 	if (view->type == CAGE_XWAYLAND_VIEW && view->user_placed) {

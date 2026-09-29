@@ -31,6 +31,7 @@ struct cg_xwayland_view {
 
 struct cg_xwayland_view *xwayland_view_from_view(struct cg_view *view);
 bool xwayland_view_should_manage(struct cg_view *view);
+bool xwayland_view_is_shell_desktop(struct cg_view *view);
 void handle_xwayland_surface_new(struct wl_listener *listener, void *data);
 struct cg_elevated;
 void xwayland_view_create(struct cg_server *server, struct wlr_xwayland_surface *xwayland_surface,

@@ -374,6 +374,7 @@ decor_create(struct cg_view *view)
 	struct cg_decor *d;
 
 	if (!view->scene_tree || view->elevated || xs->override_redirect || xs->fullscreen ||
+	    xwayland_view_is_shell_desktop(view) ||
 	    xs->decorations != WLR_XWAYLAND_SURFACE_DECORATIONS_ALL || decor_of(view)) {
 		return;
 	}

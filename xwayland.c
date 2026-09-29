@@ -8,6 +8,7 @@
 
 #include <stdbool.h>
 #include <stdlib.h>
+#include <string.h>
 #include <wayland-server-core.h>
 #include <wlr/types/wlr_scene.h>
 #include <wlr/util/log.h>
@@ -31,6 +32,17 @@ xwayland_view_should_manage(struct cg_view *view)
 	struct cg_xwayland_view *xwayland_view = xwayland_view_from_view(view);
 	struct wlr_xwayland_surface *xwayland_surface = xwayland_view->xwayland_surface;
 	return !xwayland_surface->override_redirect;
+}
+
+/* Wine's virtual desktop window, the session's shell: explorer's top-level
+ * window "<name> - Wine Desktop" (its Motif hints ask for a title, which it
+ * never gets: see decor.c) */
+bool
+xwayland_view_is_shell_desktop(struct cg_view *view)
+{
+	struct wlr_xwayland_surface *xs = xwayland_view_from_view(view)->xwayland_surface;
+	return xs && !view->elevated && !xs->override_redirect && !xs->parent && xs->class &&
+	       !strcmp(xs->class, "explorer.exe") && xs->title && strstr(xs->title, " Desktop");
 }
 
 static char *

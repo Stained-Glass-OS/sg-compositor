@@ -78,5 +78,21 @@ shot
 [ "$(px 2 $((H / 2)))" = "255,0,0" ] && [ "$(px $((W - 3)) $((H / 2)))" = "255,0,0" ] && [ "$(px $((W / 2)) 16)" = "255,255,255" ] \
     && [ "$(px $((W / 2)) $((H - 20)))" != "255,0,0" ] \
     && pass "Maximize fills the width, its bar at the top, the taskbar's strip left free" || fail "maximize: $(px 2 $((H / 2))) $(px $((W / 2)) 16) $(px $((W / 2)) $((H - 20)))"
+# Wine's desktop window (explorer.exe's "<name> - Wine Desktop", the shell)
+# is the screen: at the origin, whatever its size, and no title bar. Centred
+# like a Linux program's window, it stayed off-origin after a resolution
+# change. (An xterm stands in for it here.)
+WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 WLR_RENDERER=pixman \
+    "$COMP" -L "$T/priv2.sock" -C "$T/ctl2.sock" -U "$(id -u)" -- \
+    sh -c "echo \$\$ > $T/client2; xterm -class explorer.exe -T 'shell - Wine Desktop' -geometry 40x8 -bg '#00ff00' -fg '#00ff00' -e sleep 600 & echo up > $T/d2; exec sleep 600" \
+    >"$T/log2" 2>&1 &
+CP2=$!
+_w=0; while [ ! -s "$T/d2" ] && [ $_w -lt 50 ]; do sleep 0.2; _w=$((_w+1)); done
+sleep 4
+rm -f "$T/c.png"; WAYLAND_DISPLAY="$T/priv2.sock" grim "$T/c.png" >/dev/null 2>&1
+[ "$(px 20 20)" = "0,255,0" ] && [ "$(px 0 60)" = "0,255,0" ] && pass "Wine's desktop window is at the screen's origin" || fail "the shell's window is not at 0,0 ($(px 20 20), $(px 0 60))"
+[ "$(px $((W / 2)) $((H / 2)))" != "0,255,0" ] && pass "at its own size (not stretched), with no title bar above" || fail "it fills the screen"
+kill "$(cat "$T/client2" 2>/dev/null)" "$CP2" 2>/dev/null
+
 [ $RC = 0 ] && echo "RESULT: PASS" || echo "RESULT: FAIL"
 exit $RC
