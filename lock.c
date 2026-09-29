@@ -507,6 +507,18 @@ handle_control_connection(int fd, uint32_t mask, void *data)
 			}
 			reply = ok ? "OK\n" : "ERR no such window\n";
 		}
+	} else if (!strncmp(buf, "MINIMIZE ", 9)) {
+		/* the taskbar minimizes an elevated window: focus, not input */
+		int id = -1;
+		unsigned long window = 0;
+		if (!uid_may_lock(lock, uid)) {
+			AUDIT("refused MINIMIZE from uid %d", (int) uid);
+			reply = "ERR not permitted\n";
+		} else if (sscanf(buf + 9, "%d %lu", &id, &window) == 2 && elevated_minimize(lock->server, id, window)) {
+			reply = "OK\n";
+		} else {
+			reply = "ERR no such window\n";
+		}
 	} else if (!strcmp(buf, "WINDOWS")) {
 		static char list[8192];
 		if (!uid_may_lock(lock, uid)) {

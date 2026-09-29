@@ -200,6 +200,13 @@ k0=$(keys)
 type_keys "back"
 sleep 1
 [ "$(( $(keys) - k0 ))" -eq 4 ] && pass "and it has the keyboard again" || fail "after ACTIVATE: $(( $(keys) - k0 )) of 4 keys"
+# the taskbar minimizes it (its button clicked while it is in front), and
+# brings it back
+[ "$(ctl "MINIMIZE ${EDPY#:} $WIN")" = OK ] && sleep 1 && case "$(row)" in *" minimized "*) true ;; *) false ;; esac \
+    && pass "MINIMIZE from the session's account (the taskbar) minimizes it" || fail "MINIMIZE: [$(row)]"
+[ "$(ctl "MINIMIZE ${EDPY#:} 99999999")" = "ERR no such window" ] && pass "MINIMIZE of an unknown window: ERR" || fail "MINIMIZE unknown window"
+[ "$(ctl "ACTIVATE ${EDPY#:} $WIN")" = OK ] && sleep 1 && case "$(row)" in *" shown focused "*) true ;; *) false ;; esac \
+    && pass "and ACTIVATE brings it back, focused" || fail "restore: [$(row)]"
 
 # The real pointer (the privileged virtual pointer): a click on it after the
 # session had the focus gives it back the focus; a drag moves it.

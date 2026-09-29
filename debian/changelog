@@ -1,3 +1,13 @@
+sg-compositor (0.2.0+sg14) unstable; urgency=medium
+
+  * An elevated window can be minimized from the taskbar: the control
+    socket's MINIMIZE <display> <window> puts it away as its own minimize
+    button does (the taskbar's click, wine-sg 0500); ACTIVATE brings it
+    back. It still stays above the session's windows while shown. Gate:
+    test/elevated-gate.sh.
+
+ -- David Hamner <ke7oxh@gmail.com>  Tue, 29 Sep 2026 07:20:00 -0700
+
 sg-compositor (0.2.0+sg13) unstable; urgency=medium
 
   * A secure prompt (elevation consent) dims the desktop instead of

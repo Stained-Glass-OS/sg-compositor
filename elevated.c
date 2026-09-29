@@ -604,6 +604,8 @@ elevated_view_place(struct cg_view *view)
 	view_move_to(view, box.x + view->rx, box.y + view->ry);
 }
 
+static void view_minimize(struct cg_view *view);
+
 static void
 view_restore(struct cg_view *view)
 {
@@ -759,17 +761,39 @@ handle_request_minimize(struct wl_listener *listener, void *data)
 	struct cg_xwayland_view *xv = wl_container_of(listener, xv, request_minimize);
 	struct wlr_xwayland_minimize_event *ev = data;
 	struct cg_view *view = &xv->view;
-	struct cg_server *server = view->server;
 
 	if (!ev->minimize) {
 		view_restore(view);
 		return;
 	}
+	view_minimize(view);
+}
+
+/* the taskbar minimizes an elevated window (its button, clicked while the
+ * window is in front); the program is told, as when it asks itself */
+bool
+elevated_minimize(struct cg_server *server, int id, unsigned long window)
+{
+	struct cg_view *view;
+	wl_list_for_each (view, &server->views, link) {
+		if (view->elevated && view->elevated->id == id && xsurface_of(view)->window_id == window) {
+			view_minimize(view);
+			return true;
+		}
+	}
+	return false;
+}
+
+static void
+view_minimize(struct cg_view *view)
+{
+	struct cg_server *server = view->server;
+
 	if (view->minimized || !view->scene_tree) {
 		return;
 	}
 	view->minimized = true;
-	wlr_xwayland_surface_set_minimized(xv->xwayland_surface, true);
+	wlr_xwayland_surface_set_minimized(xsurface_of(view), true);
 	wlr_scene_node_set_enabled(&view->scene_tree->node, false);
 	if (server->seat->grab_view == view) {
 		server->seat->grab_view = NULL;

@@ -61,6 +61,7 @@ bool elevated_adopt(struct cg_server *server, uid_t uid, int wl_fd, int wm_fd, i
  * window forward (and back from minimised). Not input: nothing is typed or
  * clicked into it. */
 bool elevated_activate(struct cg_server *server, int id, unsigned long window);
+bool elevated_minimize(struct cg_server *server, int id, unsigned long window);
 
 /* Global filter: 1 visible, 0 hidden, -1 not an elevated display's concern. */
 int elevated_filter_global(struct cg_server *server, const struct wl_client *client, const struct wl_global *global);
