@@ -92,6 +92,9 @@ struct cg_server {
 	struct wlr_scene_tree *normal_tree;
 	struct wlr_scene_tree *elevated_tree;
 	struct wlr_scene_tree *privileged_tree;
+	/* sg-compositor: a secure prompt's dimming, over the desktop and under
+	 * the prompt (lock.c) */
+	struct wlr_scene_rect *dim_rect;
 	struct wlr_compositor *compositor;
 #if CAGE_HAS_XWAYLAND
 	struct wlr_xwayland *xwayland; /* the session's own */

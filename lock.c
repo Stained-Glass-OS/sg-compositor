@@ -548,7 +548,43 @@ view_set_visible(struct cg_view *view, bool visible)
 void
 lock_view_mapped(struct cg_lock *lock, struct cg_view *view)
 {
-	view_set_visible(view, lock_view_allowed(lock, view) && !view->minimized);
+	/* under a secure prompt's dimming, a window may show; under a lock, not */
+	view_set_visible(view, (lock_view_allowed(lock, view) || lock->secure) && !view->minimized);
+}
+
+/* A secure prompt dims the desktop rather than blanking it: its windows stay
+ * to be seen, darkened and out of reach of the pointer and keyboard (input
+ * goes to privileged views only, as for a lock), until the prompt, which
+ * takes a few seconds to start, covers them -- the screen used to go black
+ * for all of that time (QA: "the window goes black for 10 sec or so"). A
+ * lock, and the security screen, still hide everything. */
+static void
+set_dimmed(struct cg_server *server, bool on)
+{
+	struct wlr_box box = {0};
+
+	if (!server->dim_rect) {
+		return;
+	}
+	if (on) {
+		wlr_output_layout_get_box(server->output_layout, NULL, &box);
+		wlr_scene_node_set_position(&server->dim_rect->node, box.x, box.y);
+		wlr_scene_rect_set_size(server->dim_rect, box.width > 0 ? box.width : 1, box.height > 0 ? box.height : 1);
+	}
+	wlr_scene_node_set_enabled(&server->dim_rect->node, on);
+}
+
+static void
+hide_unprivileged(struct cg_lock *lock)
+{
+	struct cg_view *view;
+
+	wl_list_for_each (view, &lock->server->views, link) {
+		if (!lock_view_is_privileged(lock, view)) {
+			view_set_visible(view, false);
+		}
+	}
+	set_dimmed(lock->server, false);
 }
 
 static void
@@ -563,11 +599,14 @@ isolate(struct cg_lock *lock, const char *event)
 
 	wl_list_for_each (view, &server->views, link) {
 		bool privileged = lock_view_is_privileged(lock, view);
-		view_set_visible(view, privileged);
+		if (!lock->secure) {
+			view_set_visible(view, privileged);
+		}
 		if (privileged && !lock_view) {
 			lock_view = view;
 		}
 	}
+	set_dimmed(server, lock->secure);
 
 	/* Take focus away from everything first. Clearing keyboard focus sends
 	 * the client a leave event, so it releases any keys it thinks are held
@@ -595,6 +634,7 @@ lock_engage(struct cg_lock *lock)
 		 * service now puts its screen up alongside. */
 		lock->secure = false;
 		AUDIT("locked (during a secure prompt)");
+		hide_unprivileged(lock);
 		notify_watchers(lock, "locked\n");
 		return;
 	}
@@ -626,6 +666,7 @@ unisolate(struct cg_lock *lock, const char *event)
 	lock->locked = false;
 	lock->secure = false;
 	lock->sas = false;
+	set_dimmed(lock->server, false);
 	notify_watchers(lock, event);
 
 	wlr_seat_keyboard_notify_clear_focus(server->seat->seat);

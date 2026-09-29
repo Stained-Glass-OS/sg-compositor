@@ -401,6 +401,10 @@ main(int argc, char *argv[])
 	backdrop_init(&server);
 	server.normal_tree = wlr_scene_tree_create(&server.scene->tree);
 	server.elevated_tree = wlr_scene_tree_create(&server.scene->tree);
+	server.dim_rect = wlr_scene_rect_create(&server.scene->tree, 1, 1, (float[4]) {0, 0, 0, 0.62f});
+	if (server.dim_rect) {
+		wlr_scene_node_set_enabled(&server.dim_rect->node, false);
+	}
 	server.privileged_tree = wlr_scene_tree_create(&server.scene->tree);
 	if (!server.normal_tree || !server.elevated_tree || !server.privileged_tree) {
 		wlr_log(WLR_ERROR, "Unable to create the scene layers");

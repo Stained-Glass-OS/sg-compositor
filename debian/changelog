@@ -1,3 +1,14 @@
+sg-compositor (0.2.0+sg13) unstable; urgency=medium
+
+  * A secure prompt (elevation consent) dims the desktop instead of
+    blanking it: the session's windows stay to be seen, darkened and out of
+    reach of the keyboard and pointer, for the seconds the prompt takes to
+    start -- the screen went black (QA: "black for 10 sec or so"). A lock
+    and the security screen still hide every window. Gate:
+    test/secure-dim-gate.sh.
+
+ -- David Hamner <ke7oxh@gmail.com>  Tue, 29 Sep 2026 00:05:00 -0700
+
 sg-compositor (0.2.0+sg12) unstable; urgency=medium
 
   * Wine's desktop window -- the shell, explorer.exe's "<name> - Wine
