@@ -79,6 +79,12 @@ shot
 [ "$(px 2 $((H / 2)))" = "255,0,0" ] && [ "$(px $((W - 3)) $((H / 2)))" = "255,0,0" ] && [ "$(px $((W / 2)) 16)" = "255,255,255" ] \
     && [ "$(px $((W / 2)) $((H - 20)))" != "255,0,0" ] \
     && pass "Maximize fills the width, its bar at the top, the taskbar's strip left free" || fail "maximize: $(px 2 $((H / 2))) $(px $((W / 2)) 16) $(px $((W / 2)) $((H - 20)))"
+# Minimize: the third button from the right -- the window and its bar go (its
+# taskbar button brings it back: XACTIVATE, test/xwindows-gate.sh)
+ptr m $((W - 2 * 46 - 23)) 16 d s 50 u
+shot
+[ "$(px $((W / 2)) $((H / 2)))" != "255,0,0" ] && [ "$(px $((W / 2)) 16)" != "255,255,255" ] \
+    && pass "Minimize hides the window and its bar" || fail "minimize: $(px $((W / 2)) $((H / 2))) bar $(px $((W / 2)) 16)"
 # Wine's desktop window (explorer.exe's "<name> - Wine Desktop", the shell)
 # is the screen: at the origin, whatever its size, and no title bar. Centred
 # like a Linux program's window, it stayed off-origin after a resolution

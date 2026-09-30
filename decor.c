@@ -5,8 +5,8 @@
  * Linux Terminal (Administrator)'s xterm, the RDP client's dialogs -- had
  * none: no title, no way to move it, close it or make it larger. Here such a
  * window gets Windows 10's title bar, drawn by the compositor above it: the
- * title, Maximize and Close (the program has no taskbar button, so there is
- * no Minimize to lose it by), a one-pixel border; drag the bar to move the
+ * title, Minimize (its taskbar button -- the shell's XWINDOWS list -- brings
+ * it back), Maximize and Close, a one-pixel border; drag the bar to move the
  * window, double-click it to maximize. Close asks the program to close
  * (WM_DELETE_WINDOW), as a title bar's Close does.
  *
@@ -35,12 +35,13 @@
 #include "server.h"
 #include "view.h"
 #include "xwayland.h"
+#include "session_x11.h"
 
 #define BUTTON_W 46
 #define TASKBAR_H 40 /* the shell's taskbar, at the bottom: a maximized window stops above it */
 #define DOUBLE_CLICK_MS 400
 
-enum part { PART_NONE, PART_BAR, PART_MAX, PART_CLOSE };
+enum part { PART_NONE, PART_BAR, PART_MIN, PART_MAX, PART_CLOSE };
 
 struct cg_decor {
 	struct wl_list link; /* decors */
@@ -323,7 +324,16 @@ render(struct cg_decor *d)
 		put(p, w, mx + 4, cy + 3, fg);
 	}
 
-	draw_title(p, w, 12, w - 2 * BUTTON_W - 20, xs->title ? xs->title : "", fg);
+	/* Minimize: a short line */
+	int nx = w - 2 * BUTTON_W - BUTTON_W / 2;
+	if (d->hover == PART_MIN) {
+		fill(p, w, w - 3 * BUTTON_W, 0, w - 2 * BUTTON_W, DECOR_TITLE_H, 0xffe5e5e5);
+	}
+	for (int i = -5; i <= 5; i++) {
+		put(p, w, nx + i, cy, fg);
+	}
+
+	draw_title(p, w, 12, w - 3 * BUTTON_W - 20, xs->title ? xs->title : "", fg);
 
 	wlr_buffer_init(&p->base, &pixels_impl, w, DECOR_TITLE_H);
 	wlr_scene_buffer_set_buffer(d->bar, &p->base);
@@ -466,7 +476,10 @@ decor_at(struct cg_server *server, double lx, double ly, enum part *part)
 	}
 	wl_list_for_each (d, &decors, link) {
 		if (node == &d->bar->node && d->tree->node.enabled) {
-			*part = sx >= d->width - BUTTON_W ? PART_CLOSE : sx >= d->width - 2 * BUTTON_W ? PART_MAX : PART_BAR;
+			*part = sx >= d->width - BUTTON_W       ? PART_CLOSE
+				: sx >= d->width - 2 * BUTTON_W ? PART_MAX
+				: sx >= d->width - 3 * BUTTON_W ? PART_MIN
+								: PART_BAR;
 			return d;
 		}
 	}
@@ -526,6 +539,8 @@ decor_button(struct cg_seat *seat, bool pressed, uint32_t time_msec)
 				wlr_xwayland_surface_close(xsurface(d->view));
 			} else if (part == PART_MAX) {
 				toggle_maximize(d);
+			} else if (part == PART_MIN) {
+				session_x11_minimize(seat->server, xsurface(d->view)->window_id);
 			}
 		}
 		press.decor = NULL;
