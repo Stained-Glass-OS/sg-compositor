@@ -166,6 +166,25 @@ view_position(struct cg_view *view)
 		view_center(view, &layout_box);
 		return;
 	}
+	/* one larger than the screen (a program that sizes itself to the
+	 * screen: SG Office's editors) is maximized as the title bar's
+	 * Maximize does -- above the taskbar, below its own title bar -- not
+	 * over the taskbar; restored, it takes two thirds, centred */
+	if (view->type == CAGE_XWAYLAND_VIEW) {
+		struct wlr_box box = layout_box;
+		box.height -= DECOR_TASKBAR_H;
+		if (view->decorated) {
+			box.y += DECOR_TITLE_H;
+			box.height -= DECOR_TITLE_H;
+		}
+		if (!view->maximized) {
+			view->restore = (struct wlr_box){box.x + box.width / 6, box.y + box.height / 6, box.width * 2 / 3,
+							 box.height * 2 / 3};
+		}
+		view->maximized = true;
+		view_maximize(view, &box);
+		return;
+	}
 #endif
 	if (view_is_primary(view) || view_extends_output_layout(view, &layout_box)) {
 		view_maximize(view, &layout_box);
