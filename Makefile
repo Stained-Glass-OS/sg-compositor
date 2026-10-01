@@ -18,7 +18,7 @@ install: build
 # The gate is sg-session's own session gate, run with this compositor hosting
 # the session instead of cage. Milestone 1 of ADR 0011 is exactly "that still
 # passes", so the gate is the same one, not a new one.
-test: test-session test-lock test-secure test-secure-dim test-xwindows test-privileged test-sas test-power test-elevated test-popup test-backdrop test-xfloat test-decor test-capture test-wmreq test-jumpclick test-bigwindow test-desktopfront test-selfmove
+test: test-session test-lock test-secure test-secure-dim test-xwindows test-privileged test-sas test-power test-elevated test-popup test-backdrop test-xfloat test-decor test-capture test-wmreq test-jumpclick test-bigwindow test-desktopfront test-selfmove test-deskcomp
 
 test-session: build
 	@[ -d "$(SG_SESSION)" ] || { echo "sg-session checkout not found at $(SG_SESSION)"; exit 2; }
@@ -117,3 +117,10 @@ test-bigwindow: build
 .PHONY: test-xfloat
 test-xfloat: build
 	@SG_COMPOSITOR_BIN=$(CURDIR)/$(BUILD)/sg-compositor sh test/xfloat-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc
+
+# sg-deskcomp: the Wine desktop's compositor -- shadows, real alpha, window
+# effects (needs wine-sg with 0744; 77 = a prerequisite missing). And its
+# mutants: the gate must fail with each.
+test-deskcomp: build
+	@sh test/deskcomp-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc
+	@sh test/deskcomp-gate.sh --mutants; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc

@@ -172,6 +172,26 @@ executable(
   install: true,
 )
 
+# sg-deskcomp: the Wine desktop's own compositing manager (an X client --
+# drop shadows, real alpha and window effects for the Windows programs'
+# windows, which are all children of Wine's one desktop window).
+executable(
+  'sg-deskcomp',
+  'sg-deskcomp.c',
+  c_args: ['-D_GNU_SOURCE'],
+  dependencies: [
+    dependency('x11'),
+    dependency('xcomposite'),
+    dependency('xdamage'),
+    dependency('xfixes'),
+    dependency('xrender'),
+    dependency('xext'),
+    math,
+  ],
+  install: true,
+  install_dir: get_option('libexecdir') / 'stained-glass',
+)
+
 summary = [
   '',
   'Cage @0@'.format(version),

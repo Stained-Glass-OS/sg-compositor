@@ -14,6 +14,19 @@ sg-compositor (0.2.0+sg20) unstable; urgency=medium
   * Gates test-desktopfront and test-selfmove (mutants
     SG_MUTANT_DESKTOP_NOT_RAISED, SG_MUTANT_NO_SESSION_ACTIVATE,
     SG_MUTANT_GRAB_NOT_PLACED each fail them).
+  * sg-deskcomp (/usr/libexec/stained-glass): the Wine desktop's own
+    compositor. David: "The apps need to have drop shadows like in windows.
+    We also should support alpha in windows." Every Windows program's
+    window is an X child of Wine's desktop window, which X never blends;
+    sg-deskcomp redirects them (Composite) and paints them into an
+    input-transparent canvas over the desktop's picture (wine-sg 0744):
+    real alpha (layered and per-pixel), drop shadows in the look's manner
+    (_SG_SHADOW), and effects off by default: fade or zoom on open and
+    close, a lamp or scale into the taskbar on minimize, wobbly windows,
+    translucent while moved ($XDG_CONFIG_HOME/stained-glass/effects.conf,
+    Settings writes it). Input is untouched; if it exits, X draws the
+    desktop as before. Test: make test-deskcomp (pixels and frame dumps;
+    mutants NOSHADOWS, OPAQUE, NOEFFECTS).
 
  -- Stained Glass OS <ke7oxh@gmail.com>  Thu, 01 Oct 2026 17:30:00 +0000
 
