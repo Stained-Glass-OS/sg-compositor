@@ -606,7 +606,9 @@ static void draw_wobbling(struct win *w, Picture mask)
 	pm = XCreatePixmap(dpy, desktop, bw, bh, 32);
 	tmp = XRenderCreatePicture(dpy, pm, argb_format, 0, NULL);
 	XRenderFillRectangle(dpy, PictOpClear, tmp, &(XRenderColor){ 0, 0, 0, 0 }, 0, 0, bw, bh);
-	XRenderSetPictureFilter(dpy, w->pict, "bilinear", NULL, 0);
+	/* nearest, not bilinear: the window is moving, and the X server draws
+	 * it in software -- a bilinear mesh cost Xwayland most of a core */
+	XRenderSetPictureFilter(dpy, w->pict, "fast", NULL, 0);
 	for (int j = 0; j < ty; j++)
 		for (int i = 0; i < tx; i++) {
 			float u0 = (float)i / tx, u1 = (float)(i + 1) / tx, v0 = (float)j / ty, v1 = (float)(j + 1) / ty;
@@ -1059,7 +1061,11 @@ int main(int argc, char **argv)
 			if (count) { busy = paint(); XFlush(dpy); dump(); }
 			else last_frame = 0;
 		}
-		if (!XPending(dpy)) poll(&pfd, 1, busy ? 16 : 1000);
+		if (!XPending(dpy)) {
+			int wobbling = 0;
+			for (int i = 0; i < nwins; i++) wobbling |= wins[i].wobbling;
+			poll(&pfd, 1, !busy ? 1000 : wobbling ? 33 : 16);   /* a wobble at 30 frames a second is enough */
+		}
 	}
 	/* hand the windows back to X */
 	if (desktop) {
