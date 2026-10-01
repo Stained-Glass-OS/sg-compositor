@@ -18,7 +18,7 @@ install: build
 # The gate is sg-session's own session gate, run with this compositor hosting
 # the session instead of cage. Milestone 1 of ADR 0011 is exactly "that still
 # passes", so the gate is the same one, not a new one.
-test: test-session test-lock test-secure test-secure-dim test-xwindows test-privileged test-sas test-power test-elevated test-popup test-backdrop test-xfloat test-decor test-capture test-wmreq test-jumpclick test-bigwindow
+test: test-session test-lock test-secure test-secure-dim test-xwindows test-privileged test-sas test-power test-elevated test-popup test-backdrop test-xfloat test-decor test-capture test-wmreq test-jumpclick test-bigwindow test-desktopfront test-selfmove
 
 test-session: build
 	@[ -d "$(SG_SESSION)" ] || { echo "sg-session checkout not found at $(SG_SESSION)"; exit 2; }
@@ -82,6 +82,18 @@ test-backdrop: build
 	@SG_COMPOSITOR_BIN=$(CURDIR)/$(BUILD)/sg-compositor sh test/backdrop-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc
 
 # An X11 window of a Linux program keeps the size it asks for, centred.
+# The shell's desktop in front of Linux programs' windows (XDESKTOP), and
+# a Linux program bringing its own window forward (_NET_ACTIVE_WINDOW).
+.PHONY: test-desktopfront
+test-desktopfront: build
+	@SG_COMPOSITOR_BIN=$(CURDIR)/$(BUILD)/sg-compositor sh test/desktopfront-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc
+
+# A Linux program dragged by its own title bar (_NET_WM_MOVERESIZE) moves,
+# and stays where it was put.
+.PHONY: test-selfmove
+test-selfmove: build
+	@SG_COMPOSITOR_BIN=$(CURDIR)/$(BUILD)/sg-compositor sh test/selfmove-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc
+
 .PHONY: test-wmreq
 test-wmreq: build
 	@SG_COMPOSITOR_BIN=$(CURDIR)/$(BUILD)/sg-compositor sh test/wmreq-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc

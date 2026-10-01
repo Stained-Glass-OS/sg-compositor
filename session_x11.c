@@ -124,8 +124,38 @@ session_x11_activate(struct cg_server *server, unsigned long window)
 	if (view->scene_tree) {
 		wlr_scene_node_raise_to_top(&view->scene_tree->node);
 	}
+	/* X's stacking as the screen's: the shell's desktop may have been
+	 * brought above it (XDESKTOP) */
+	wlr_xwayland_surface_restack(xwayland_view_from_view(view)->xwayland_surface, NULL, XCB_STACK_MODE_ABOVE);
 	seat_set_focus(server->seat, view);
 	return true;
+}
+
+/* The shell's desktop -- Wine's desktop window, with every Wine program's
+ * window in it -- in front of the session's Linux programs' windows: the
+ * taskbar asks when a Wine window is brought forward (its button, Start, a
+ * program starting) while a Linux program's window is in front of it. They
+ * stay shown and on the taskbar; XACTIVATE brings one forward again.
+ * Elevated windows and the lock screen are in layers above and stay there. */
+bool
+session_x11_desktop_front(struct cg_server *server)
+{
+	struct cg_view *view;
+
+	wl_list_for_each (view, &server->views, link) {
+		if (view->type != CAGE_XWAYLAND_VIEW || !xwayland_view_is_shell_desktop(view)) {
+			continue;
+		}
+#ifndef SG_MUTANT_DESKTOP_NOT_RAISED
+		if (view->scene_tree) {
+			wlr_scene_node_raise_to_top(&view->scene_tree->node);
+		}
+		wlr_xwayland_surface_restack(xwayland_view_from_view(view)->xwayland_surface, NULL, XCB_STACK_MODE_ABOVE);
+#endif
+		seat_set_focus(server->seat, view);
+		return true;
+	}
+	return false;
 }
 
 bool
@@ -173,4 +203,5 @@ session_x11_list(struct cg_server *server, char *buf, size_t len)
 bool session_x11_activate(struct cg_server *server, unsigned long window) { (void) server; (void) window; return false; }
 bool session_x11_minimize(struct cg_server *server, unsigned long window) { (void) server; (void) window; return false; }
 bool session_x11_close(struct cg_server *server, unsigned long window) { (void) server; (void) window; return false; }
+bool session_x11_desktop_front(struct cg_server *server) { (void) server; return false; }
 #endif

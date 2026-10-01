@@ -507,6 +507,15 @@ handle_control_connection(int fd, uint32_t mask, void *data)
 			}
 			reply = ok ? "OK\n" : "ERR no such window\n";
 		}
+	} else if (!strcmp(buf, "XDESKTOP")) {
+		/* the taskbar: a Wine window came forward -- the shell's desktop in
+		 * front of the session's Linux programs' windows */
+		if (!uid_may_lock(lock, uid)) {
+			AUDIT("refused XDESKTOP from uid %d", (int) uid);
+			reply = "ERR not permitted\n";
+		} else {
+			reply = session_x11_desktop_front(lock->server) ? "OK\n" : "ERR no desktop\n";
+		}
 	} else if (!strncmp(buf, "MINIMIZE ", 9)) {
 		/* the taskbar minimizes an elevated window: focus, not input */
 		int id = -1;

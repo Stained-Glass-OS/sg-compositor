@@ -2,8 +2,12 @@
  * wanted, _MOTIF_WM_HINTS), and asks the window manager to maximise and
  * minimise it the standard way (test/wmreq-gate.sh).
  *   wmreq-client max   -- ask maximised, then print WxH
- *   wmreq-client min   -- ask to be minimised (WM_CHANGE_STATE IconicState) */
+ *   wmreq-client min   -- ask to be minimised (WM_CHANGE_STATE IconicState)
+ *   wmreq-client activate SECONDS -- a green window that, after SECONDS,
+ *                          asks to be brought forward (_NET_ACTIVE_WINDOW,
+ *                          as SG Office does for a file opened again) */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <X11/Xlib.h>
@@ -36,7 +40,13 @@ int main(int argc, char **argv)
 	XMapWindow(d, w);
 	XSync(d, False);
 	sleep(2);
-	if (!strcmp(argv[1], "max")) {
+	if (!strcmp(argv[1], "activate") && argc > 2) {
+		sleep(atoi(argv[2]));
+		client_message(d, w, "_NET_ACTIVE_WINDOW", 1 /* an application */, CurrentTime, 0);
+		printf("asked\n");
+		fflush(stdout);
+		sleep(600);
+	} else if (!strcmp(argv[1], "max")) {
 		client_message(d, w, "_NET_WM_STATE", 1, XInternAtom(d, "_NET_WM_STATE_MAXIMIZED_VERT", False),
 			       XInternAtom(d, "_NET_WM_STATE_MAXIMIZED_HORZ", False));
 		sleep(2);

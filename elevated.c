@@ -48,6 +48,7 @@
  */
 #define _GNU_SOURCE
 #include "elevated.h"
+#include "session_x11.h"
 #include "decor.h"
 
 #include <errno.h>
@@ -750,6 +751,11 @@ elevated_grab_motion(struct cg_seat *seat, double lx, double ly)
 	}
 	wlr_xwayland_surface_configure(xsurface_of(view), b.x, b.y, b.width, b.height);
 	view_move_to(view, b.x, b.y);
+	/* where the user put it stays: a session window's own configure
+	 * requests (a resize) do not centre it again (view_position) */
+#ifndef SG_MUTANT_GRAB_NOT_PLACED
+	view->user_placed = true;
+#endif
 	return true;
 }
 
@@ -910,11 +916,29 @@ handle_session_request_maximize(struct wl_listener *listener, void *data)
 	}
 }
 
+/* A Linux program brings its own window forward (_NET_ACTIVE_WINDOW: SG
+ * Office when a file already open in it is opened again): as the taskbar's
+ * XACTIVATE does. */
+static void
+handle_session_request_activate(struct wl_listener *listener, void *data)
+{
+	struct cg_xwayland_view *xv = wl_container_of(listener, xv, request_activate);
+	(void) data;
+#ifdef SG_MUTANT_NO_SESSION_ACTIVATE
+	return;
+#endif
+	if (xv->view.wlr_surface && !xwayland_view_is_shell_desktop(&xv->view)) {
+		session_x11_activate(xv->view.server, xv->xwayland_surface->window_id);
+	}
+}
+
 void
 session_view_listen(struct cg_xwayland_view *xv)
 {
 	struct wlr_xwayland_surface *xs = xv->xwayland_surface;
 
+	xv->request_activate.notify = handle_session_request_activate;
+	wl_signal_add(&xs->events.request_activate, &xv->request_activate);
 	xv->request_move.notify = handle_request_move;
 	wl_signal_add(&xs->events.request_move, &xv->request_move);
 	xv->request_resize.notify = handle_request_resize;
@@ -932,6 +956,7 @@ session_view_unlisten(struct cg_xwayland_view *xv)
 	wl_list_remove(&xv->request_resize.link);
 	wl_list_remove(&xv->request_minimize.link);
 	wl_list_remove(&xv->request_maximize.link);
+	wl_list_remove(&xv->request_activate.link);
 }
 
 void

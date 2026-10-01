@@ -1,3 +1,22 @@
+sg-compositor (0.2.0+sg20) unstable; urgency=medium
+
+  * Wine's desktop and the Linux programs' windows take turns in front.
+    Every Wine window (File Explorer, Notepad, the Start menu) is inside
+    Wine's desktop window, below a Linux program's (SG Office's editors),
+    which hid them all: the Start menu opened behind SG Office. A new
+    control command XDESKTOP (session_x11.c) puts the desktop in front,
+    with the focus; the taskbar asks for it when a Wine window comes
+    forward (wine-sg 0700). XACTIVATE also restacks X as the screen.
+  * A Linux program bringing its own window forward (_NET_ACTIVE_WINDOW:
+    SG Office when a file open in it is opened again) gets it in front.
+  * A window moved by dragging its own title bar (_NET_WM_MOVERESIZE)
+    stays where it was put: its next resize no longer centres it again.
+  * Gates test-desktopfront and test-selfmove (mutants
+    SG_MUTANT_DESKTOP_NOT_RAISED, SG_MUTANT_NO_SESSION_ACTIVATE,
+    SG_MUTANT_GRAB_NOT_PLACED each fail them).
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Thu, 01 Oct 2026 17:30:00 +0000
+
 sg-compositor (0.2.0+sg19) unstable; urgency=medium
 
   * An elevated program's dialog takes clicks: the elevated X server now
