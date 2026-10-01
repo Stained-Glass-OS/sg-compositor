@@ -4,6 +4,7 @@
  *   deskcomp-probe argb X Y              a popup with per-pixel alpha: blue, a quarter opaque
  *   deskcomp-probe minimize TITLE        minimize that window, and exit
  *   deskcomp-probe frosted X Y           a red popup, 200x150, frosted at 50% (__wine_sg_acrylic, wine-sg 0745)
+ *   deskcomp-probe full                  a white popup over the whole screen, on top
  * Each stays until killed. (Built with mingw-w64; runs in wine-sg.) */
 #include <windows.h>
 
@@ -41,7 +42,10 @@ int wmain(int argc, WCHAR **argv)
         if (w) PostMessageW(w, WM_SYSCOMMAND, SC_MINIMIZE, 0);
         return w ? 0 : 1;
     }
-    if (argc >= 4 && !lstrcmpW(argv[1], L"frosted"))
+    if (argc >= 2 && !lstrcmpW(argv[1], L"full"))
+        h = CreateWindowExW(WS_EX_TOPMOST, L"deskcomp", L"full", WS_POPUP | WS_VISIBLE, 0, 0,
+                            GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN), 0, 0, 0, 0);
+    else if (argc >= 4 && !lstrcmpW(argv[1], L"frosted"))
     {
         fill = RGB(255, 0, 0);
         h = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW, L"deskcomp", L"frosted", WS_POPUP,

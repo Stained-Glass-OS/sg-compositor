@@ -36,6 +36,12 @@ sg-compositor (0.2.0+sg20) unstable; urgency=medium
     see-through by the rest; any change below repaints it whole. Test:
     deskcomp-gate (half see-through, blurred across an edge; mutant
     NOFROST).
+  * sg-deskcomp leaves a full-screen window to X: when the window on top
+    covers the desktop and is opaque and still (a game, a video), the
+    canvas is hidden and that window is no longer redirected, so it costs
+    no copy; another window above it, or a change of size, and it is
+    composited again. Test: deskcomp-gate (direct=, the canvas unmapped,
+    then back; mutant NODIRECT).
 
  -- Stained Glass OS <ke7oxh@gmail.com>  Thu, 01 Oct 2026 17:30:00 +0000
 

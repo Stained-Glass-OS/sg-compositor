@@ -106,6 +106,7 @@ static const char *dump_path;
 static volatile sig_atomic_t quit;
 static int trapped;
 static unsigned long frames;
+static Window direct;               /* a full-screen opaque window drawn by X itself, the canvas hidden */
 static double last_frame;
 
 /* the settings */
@@ -234,7 +235,7 @@ static void get_pictures(struct win *w)
 	XRenderPictFormat *f;
 
 	free_pictures(w);
-	if (!w->mapped || !w->managed || !XGetWindowAttributes(dpy, w->id, &a)) return;
+	if (!w->mapped || !w->managed || w->id == direct || !XGetWindowAttributes(dpy, w->id, &a)) return;
 	trapped = 0;
 	w->pixmap = XCompositeNameWindowPixmap(dpy, w->id);
 	XSync(dpy, False);
@@ -826,7 +827,8 @@ static void dump(void)
 	if (!dump_path) return;
 	snprintf(tmp, sizeof(tmp), "%s.part", dump_path);
 	if (!(f = fopen(tmp, "w"))) return;
-	fprintf(f, "desktop=0x%lx canvas=0x%lx size=%dx%d background=%d frames=%lu\n", desktop, canvas, dw, dh, bg_pict != 0, frames);
+	fprintf(f, "desktop=0x%lx canvas=0x%lx size=%dx%d background=%d frames=%lu direct=0x%lx\n", desktop, canvas, dw, dh,
+	        bg_pict != 0, frames, direct);
 	fprintf(f, "settings shadows=%d shadow=%s animations=%d open=%s minimize=%s wobbly=%d moving=%d\n",
 	        opt_shadows, opt_shadow, opt_anim, opt_open, opt_minimize, opt_wobbly, opt_moving);
 	for (int i = 0; i < nwins; i++) {
@@ -932,6 +934,42 @@ static void detach(void)
 	buffer_pixmap = 0;
 	canvas = 0;
 	desktop = 0;
+	direct = 0;
+}
+
+/* A full-screen window on top, opaque and still (a game, a video): X draws
+ * it straight to the screen, with no copy through the canvas -- the canvas
+ * is hidden and the window no longer redirected -- until another window
+ * comes above it or it stops covering the desktop. */
+static void check_direct(void)
+{
+	struct win *top = NULL;
+	for (int i = nwins - 1; i >= 0; i--)
+		if (wins[i].mapped && !wins[i].ghost && wins[i].w > 1) { top = &wins[i]; break; }
+	if (top && (!top->managed || top->x > 0 || top->y > 0 || top->x + top->w + 2 * top->bw < dw ||
+	            top->y + top->h + 2 * top->bw < dh || top->argb || top->opacity != 0xffffffff || top->acrylic ||
+	            top->anim != ANIM_NONE || top->wobbling))
+		top = NULL;
+#ifdef SG_MUTANT_NODIRECT
+	top = NULL;
+#endif
+	if (top && top->id == direct) return;
+	if (direct) {
+		struct win *w = find(direct);
+		trapped = 0;
+		XCompositeRedirectWindow(dpy, direct, CompositeRedirectManual);
+		XSync(dpy, False);
+		if (w) { w->managed = !trapped; get_pictures(w); }
+		XMapRaised(dpy, canvas);
+		direct = 0;
+		damage_rect(0, 0, dw, dh);
+	}
+	if (top) {
+		XUnmapWindow(dpy, canvas);
+		free_pictures(top);
+		XCompositeUnredirectWindow(dpy, top->id, CompositeRedirectManual);
+		direct = top->id;
+	}
 }
 
 static void on_configure(XConfigureEvent *ce)
@@ -1103,7 +1141,12 @@ int main(int argc, char **argv)
 		}
 		if (!desktop) continue;
 		read_settings();
-		{
+		check_direct();
+		if (direct) {
+			/* X draws the screen now: nothing to paint, nothing owed */
+			XFixesSetRegion(dpy, damage_all, NULL, 0);
+			dump();
+		} else {
 			XRectangle ext;
 			int count = 0;
 			XRectangle *rects = XFixesFetchRegionAndBounds(dpy, damage_all, &count, &ext);
@@ -1120,7 +1163,8 @@ int main(int argc, char **argv)
 	/* hand the windows back to X */
 	if (desktop) {
 		for (int i = 0; i < nwins; i++)
-			if (wins[i].managed && !wins[i].ghost) XCompositeUnredirectWindow(dpy, wins[i].id, CompositeRedirectManual);
+			if (wins[i].managed && !wins[i].ghost && wins[i].id != direct)
+				XCompositeUnredirectWindow(dpy, wins[i].id, CompositeRedirectManual);
 		if (canvas) XDestroyWindow(dpy, canvas);
 	}
 	XCloseDisplay(dpy);
