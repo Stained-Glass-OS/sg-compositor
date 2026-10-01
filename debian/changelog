@@ -1,3 +1,20 @@
+sg-compositor (0.2.0+sg17) unstable; urgency=medium
+
+  * A click right after the pointer jumps onto an X window reaches it. An
+    absolute pointer (a tablet, a touch screen, Remote Desktop, a VM's)
+    moves in one step; wlroots sent the window only "enter" there -- the
+    motion to the same spot is left out -- and Xwayland put the click that
+    followed on its root: an elevated program's OK did nothing until the
+    pointer moved inside it, and a Linux program's menu did not open (a
+    Wine window below got the click instead). Entering a surface, the
+    seat now sends a frame and a motion to it too. Test: make
+    test-jumpclick (xev, beside a terminal and a raw-motion client as
+    Wine is, jumped onto and clicked by one virtual pointer; mutant: the
+    click is lost, no motion follows the enter). VM: elevated message box
+    OK 3/3 (was 0/3); FeatherPad's File menu opens.
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Thu, 01 Oct 2026 05:20:00 +0000
+
 sg-compositor (0.2.0+sg16) unstable; urgency=medium
 
   * Any program may capture the screen -- OBS, screen sharing through the

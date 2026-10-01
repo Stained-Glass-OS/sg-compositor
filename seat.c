@@ -818,8 +818,18 @@ process_cursor_motion(struct cg_seat *seat, uint32_t time_msec, double dx, doubl
 	struct cg_view *view = desktop_view_at(seat->server, seat->cursor->x, seat->cursor->y, &surface, &sx, &sy);
 	if (!view) {
 		wlr_seat_pointer_clear_focus(wlr_seat);
-	} else {
+	} else if (wlr_seat->pointer_state.focused_surface != surface) {
+		/* sg-compositor: entering a surface, Xwayland is also given a
+		 * motion to it -- wlroots leaves out a motion to where the enter
+		 * already put the pointer, and an X window entered that way
+		 * missed the click that followed (a click right after the
+		 * pointer jumped there: a tablet, a touch screen, Remote
+		 * Desktop, the QA VM): its button went to the X root. */
 		wlr_seat_pointer_notify_enter(wlr_seat, surface, sx, sy);
+		wlr_seat_pointer_notify_frame(wlr_seat);
+		wlr_seat_pointer_notify_motion(wlr_seat, time_msec, sx + 1.0 / 128, sy);
+		wlr_seat_pointer_notify_motion(wlr_seat, time_msec, sx, sy);
+	} else {
 		wlr_seat_pointer_notify_motion(wlr_seat, time_msec, sx, sy);
 	}
 
