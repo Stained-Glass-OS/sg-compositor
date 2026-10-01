@@ -45,6 +45,9 @@ struct cg_lock {
 	 * injection, output and gamma control. */
 	const struct wl_global *restricted[16];
 	int n_restricted;
+	/* Screen capture for everyone else (public_capture.c): hidden from the
+	 * privileged clients, which have the real one. */
+	const struct wl_global *public_capture;
 
 	/* WATCH connections: told "locked" / "unlocked" as it happens, so the
 	 * lock service can put up the lock screen when Win+L is pressed. */

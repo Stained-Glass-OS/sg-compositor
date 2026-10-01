@@ -58,6 +58,7 @@
 #include "idle_inhibit_v1.h"
 #include "backdrop.h"
 #include "output.h"
+#include "public_capture.h"
 #include "seat.h"
 #include "server.h"
 #include "view.h"
@@ -528,6 +529,10 @@ main(int argc, char *argv[])
 		wlr_log(WLR_ERROR, "Unable to create the screencopy manager");
 		ret = 1;
 		goto end;
+	}
+	/* everyone else may capture the screen, but not the secure screens (David) */
+	if (!(server.lock.public_capture = public_capture_create(&server))) {
+		wlr_log(WLR_ERROR, "Unable to create the public screen capture");
 	}
 
 	if (!wlr_single_pixel_buffer_manager_v1_create(server.wl_display)) {

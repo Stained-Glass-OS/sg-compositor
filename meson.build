@@ -55,6 +55,8 @@ server_protocols = [
   [wl_protocol_dir, 'stable/xdg-shell/xdg-shell.xml'],
   # sg-compositor: not in wayland-protocols; vendored from wlroots (MIT).
   [meson.current_source_dir(), 'protocol/wlr-output-power-management-unstable-v1.xml'],
+  # screen capture for everyone, secure screens blanked (public_capture.c)
+  [meson.current_source_dir(), 'protocol/wlr-screencopy-unstable-v1.xml'],
 ]
 
 server_protos_headers = []
@@ -63,6 +65,14 @@ foreach p : server_protocols
   xml = join_paths(p)
   server_protos_headers += wayland_scanner_server.process(xml)
 endforeach
+
+# public_capture.c implements screencopy itself: its interfaces, not only the header
+wayland_scanner_code = generator(
+  wayland_scanner,
+  output: '@BASENAME@-protocol.c',
+  arguments: ['private-code', '@INPUT@', '@OUTPUT@'],
+)
+server_protos_headers += wayland_scanner_code.process('protocol/wlr-screencopy-unstable-v1.xml')
 
 server_protos = declare_dependency(
   sources: server_protos_headers,
@@ -117,6 +127,7 @@ endif
 cage_sources = [
   'backdrop.c',
   'lock.c',
+  'public_capture.c',
   'elevated.c',
   'session_x11.c',
   'cage.c',
@@ -133,6 +144,7 @@ cage_headers = [
                  output: 'config.h',
                  configuration: conf_data),
   'elevated.h',
+  'public_capture.h',
   'idle_inhibit_v1.h',
   'output.h',
   'seat.h',

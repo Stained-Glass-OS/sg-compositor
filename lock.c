@@ -831,6 +831,9 @@ global_filter(const struct wl_client *client, const struct wl_global *global, vo
 			return lock_client_is_privileged(lock, client);
 		}
 	}
+	if (global == lock->public_capture) {
+		return !lock_client_is_privileged(lock, client);
+	}
 	return true;
 }
 

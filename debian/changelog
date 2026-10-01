@@ -1,3 +1,17 @@
+sg-compositor (0.2.0+sg16) unstable; urgency=medium
+
+  * Any program may capture the screen -- OBS, screen sharing through the
+    portal -- and the secure screens stay out of it (David: "let any app
+    capture, with lock and consent screens blanked out of captures"). A
+    screencopy of our own (public_capture.c) for every client but the
+    privileged ones: the output as shown, but black while the session is
+    locked, a secure prompt (elevation consent) is up or the security
+    screen is open. wlroots' own stays for privileged clients (Remote
+    Desktop sees the lock screen). Test: make test-capture (mutant: no
+    blanking).
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Wed, 30 Sep 2026 23:40:00 +0000
+
 sg-compositor (0.2.0+sg15) unstable; urgency=medium
 
   * Linux programs' windows get a Minimize button on their title bar (David:
