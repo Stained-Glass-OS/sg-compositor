@@ -3,6 +3,7 @@
  *   deskcomp-probe layered X Y ALPHA     a red layered popup, 200x150, ALPHA/255 opaque
  *   deskcomp-probe argb X Y              a popup with per-pixel alpha: blue, a quarter opaque
  *   deskcomp-probe minimize TITLE        minimize that window, and exit
+ *   deskcomp-probe frosted X Y           a red popup, 200x150, frosted at 50% (__wine_sg_acrylic, wine-sg 0745)
  * Each stays until killed. (Built with mingw-w64; runs in wine-sg.) */
 #include <windows.h>
 
@@ -40,7 +41,16 @@ int wmain(int argc, WCHAR **argv)
         if (w) PostMessageW(w, WM_SYSCOMMAND, SC_MINIMIZE, 0);
         return w ? 0 : 1;
     }
-    if (argc >= 7 && !lstrcmpW(argv[1], L"win"))
+    if (argc >= 4 && !lstrcmpW(argv[1], L"frosted"))
+    {
+        fill = RGB(255, 0, 0);
+        h = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW, L"deskcomp", L"frosted", WS_POPUP,
+                            _wtoi(argv[2]), _wtoi(argv[3]), 200, 150, 0, 0, 0, 0);
+        SetPropW(h, L"__wine_sg_acrylic", (HANDLE)50);
+        ShowWindow(h, SW_SHOWNOACTIVATE);
+        SetWindowPos(h, 0, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+    else if (argc >= 7 && !lstrcmpW(argv[1], L"win"))
         h = CreateWindowW(L"deskcomp", argv[2], WS_OVERLAPPEDWINDOW | WS_VISIBLE, _wtoi(argv[3]), _wtoi(argv[4]),
                           _wtoi(argv[5]), _wtoi(argv[6]), 0, 0, 0, 0);
     else if (argc >= 5 && !lstrcmpW(argv[1], L"layered"))

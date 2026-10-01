@@ -85,6 +85,7 @@ struct win {
 	int ghost;                  /* a picture kept for a closing or minimizing animation */
 	double last_move;           /* when it last moved (translucent while moving, wobble grabs) */
 	int wobbling, anchor;
+	unsigned long acrylic;      /* _SG_ACRYLIC: frosted, this opaque in percent (0: not) */
 	float ox[GRID * GRID], oy[GRID * GRID], vx[GRID * GRID], vy[GRID * GRID];
 };
 
@@ -100,7 +101,7 @@ static XserverRegion damage_all;
 static int damage_event, damage_error, xfixes_event, xfixes_error, shape_event, shape_error;
 static struct win *wins;
 static int nwins, capwins;
-static Atom atom_shadow, atom_opacity, atom_bgpixmap;
+static Atom atom_shadow, atom_opacity, atom_bgpixmap, atom_acrylic;
 static const char *dump_path;
 static volatile sig_atomic_t quit;
 static int trapped;
@@ -367,6 +368,7 @@ static void add_window(Window id)
 	w->damage = XDamageCreate(dpy, id, XDamageReportNonEmpty);
 	w->kind = window_kind(id);
 	w->opacity = prop_card(id, atom_opacity, XA_CARDINAL, 0xffffffff);
+	w->acrylic = prop_card(id, atom_acrylic, XA_CARDINAL, 0);
 	XShapeSelectInput(dpy, id, ShapeNotifyMask);
 	get_shape(w);
 	if (w->mapped) { get_pictures(w); damage_win(w); }
@@ -674,6 +676,28 @@ static void draw_shadow(struct win *w, double fade)
 		                 w->x + dx - 2 * radius, w->y + dy - 2 * radius, ww + 4 * radius, wh + 4 * radius);
 }
 
+/* what is below a frosted window, blurred: drawn an eighth of its size and
+ * back (bilinear both ways), in place */
+static void blur_below(int x, int y, int w, int h)
+{
+	int sw = w / 8 + 2, sh = h / 8 + 2;
+	Pixmap pm;
+	Picture small;
+
+	if (w <= 0 || h <= 0) return;
+	pm = XCreatePixmap(dpy, desktop, sw, sh, depth);
+	small = XRenderCreatePicture(dpy, pm, format, 0, NULL);
+	XRenderSetPictureFilter(dpy, buffer_pict, "bilinear", NULL, 0);
+	set_transform(buffer_pict, 8, 0, x, 0, 8, y);
+	XRenderComposite(dpy, PictOpSrc, buffer_pict, None, small, 0, 0, 0, 0, 0, 0, sw, sh);
+	reset_transform(buffer_pict);
+	XRenderSetPictureFilter(dpy, small, "bilinear", NULL, 0);
+	set_transform(small, 1.0 / 8, 0, 0, 0, 1.0 / 8, 0);
+	XRenderComposite(dpy, PictOpSrc, small, None, buffer_pict, 0, 0, 0, 0, x, y, w, h);
+	XRenderFreePicture(dpy, small);
+	XFreePixmap(dpy, pm);
+}
+
 /* one window, over what is below it; 1 while it is still moving, -1 when a
  * ghost's animation is over */
 static int draw_window(struct win *w, double t)
@@ -705,6 +729,13 @@ static int draw_window(struct win *w, double t)
 	}
 	if (w->wobbling) busy = 1;
 	if (has_shadow(w) && zoom == 1.0 && minimize < 0 && !w->wobbling) draw_shadow(w, fade * opacity);
+#ifndef SG_MUTANT_NOFROST
+	if (w->acrylic && w->acrylic < 100 && minimize < 0 && !w->wobbling) {
+		/* frosted: the blur below, the window over it see-through by the rest */
+		blur_below(w->x, w->y, ww, wh);
+		opacity *= w->acrylic / 100.0;
+	}
+#endif
 	if (opacity < 1.0 || fade < 1.0) mask = solid(fade * opacity);
 
 	if (minimize >= 0)
@@ -748,6 +779,22 @@ static int paint(void)
 	last_frame = t;
 	for (int i = 0; i < nwins; i++)
 		if (wins[i].wobbling) { damage_win(&wins[i]); wobble_step(&wins[i], dt); damage_win(&wins[i]); }
+	for (int i = 0; i < nwins; i++) {
+		/* a frosted window blurs what is below all of it: any change under
+		 * it repaints it whole, not only the changed part */
+		struct win *w = &wins[i];
+		XRectangle r = { w->x, w->y, w->w + 2 * w->bw, w->h + 2 * w->bw }, ext;
+		XserverRegion inter;
+		int n = 0;
+		XRectangle *rects;
+		if (!w->acrylic || !w->mapped) continue;
+		inter = XFixesCreateRegion(dpy, &r, 1);
+		XFixesIntersectRegion(dpy, inter, inter, damage_all);
+		rects = XFixesFetchRegionAndBounds(dpy, inter, &n, &ext);
+		if (rects) XFree(rects);
+		XFixesDestroyRegion(dpy, inter);
+		if (n) damage_rect(r.x, r.y, r.width, r.height);
+	}
 	XFixesSetPictureClipRegion(dpy, buffer_pict, 0, 0, damage_all);
 	if (bg_pict)
 		XRenderComposite(dpy, PictOpSrc, bg_pict, None, buffer_pict, 0, 0, 0, 0, 0, 0, dw, dh);
@@ -785,9 +832,10 @@ static void dump(void)
 	for (int i = 0; i < nwins; i++) {
 		float m = 0;
 		for (int j = 0; j < GRID * GRID; j++) m = fmaxf(m, fmaxf(fabsf(wins[i].ox[j]), fabsf(wins[i].oy[j])));
-		fprintf(f, "win 0x%lx %d,%d %dx%d mapped=%d managed=%d argb=%d kind=%d opacity=%lu anim=%d ghost=%d wobble=%.1f shadow=%d\n",
+		fprintf(f, "win 0x%lx %d,%d %dx%d mapped=%d managed=%d argb=%d kind=%d opacity=%lu anim=%d ghost=%d wobble=%.1f shadow=%d acrylic=%lu\n",
 		        wins[i].id, wins[i].x, wins[i].y, wins[i].w, wins[i].h, wins[i].mapped, wins[i].managed, wins[i].argb,
-		        wins[i].kind, wins[i].opacity, wins[i].anim, wins[i].ghost, m, has_shadow(&wins[i]) && wins[i].mapped);
+		        wins[i].kind, wins[i].opacity, wins[i].anim, wins[i].ghost, m, has_shadow(&wins[i]) && wins[i].mapped,
+		        wins[i].acrylic);
 	}
 	fclose(f);
 	rename(tmp, dump_path);
@@ -951,6 +999,7 @@ int main(int argc, char **argv)
 	atom_opacity = XInternAtom(dpy, "_NET_WM_WINDOW_OPACITY", False);
 	atom_shadow = XInternAtom(dpy, "_SG_SHADOW", False);
 	atom_bgpixmap = XInternAtom(dpy, "_SG_DESKTOP_PIXMAP", False);
+	atom_acrylic = XInternAtom(dpy, "_SG_ACRYLIC", False);
 	argb_format = XRenderFindStandardFormat(dpy, PictStandardARGB32);
 	a8_format = XRenderFindStandardFormat(dpy, PictStandardA8);
 	damage_all = XFixesCreateRegion(dpy, NULL, 0);
@@ -1046,6 +1095,7 @@ int main(int argc, char **argv)
 				} else if ((w = find(e.xproperty.window))) {
 					if (e.xproperty.atom == atom_opacity) w->opacity = prop_card(w->id, atom_opacity, XA_CARDINAL, 0xffffffff);
 					else if (e.xproperty.atom == atom_shadow) w->kind = window_kind(w->id);
+					else if (e.xproperty.atom == atom_acrylic) w->acrylic = prop_card(w->id, atom_acrylic, XA_CARDINAL, 0);
 					damage_win(w);
 				}
 				break;

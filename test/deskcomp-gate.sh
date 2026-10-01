@@ -10,7 +10,8 @@
 #   - a window with a title bar has a shadow below and beside it, and none
 #     once sg-deskcomp is gone (the desktop drawn by X again, its canvas gone);
 #   - a layered window half opaque is blended over the desktop, and a window
-#     with per-pixel alpha too;
+#     with per-pixel alpha too; a frosted one (wine-sg 0745's _SG_ACRYLIC:
+#     the taskbar with "Transparency effects") blurs what is below it;
 #   - a new window fades in (open=fade); a dragged window wobbles and settles
 #     where it was dropped (wobbly=1); a minimized one shrinks into the
 #     taskbar, its picture kept for the animation (minimize=lamp).
@@ -29,7 +30,7 @@ unset DISPLAY WAYLAND_DISPLAY
 
 if [ "${1:-}" = --mutants ]; then
     rc=0
-    for m in NOSHADOWS OPAQUE NOEFFECTS; do
+    for m in NOSHADOWS OPAQUE NOEFFECTS NOFROST; do
         out=$(mktemp /var/tmp/sg-deskcomp-mutant.XXXXXX)
         cc -std=c11 -O2 -DSG_MUTANT_$m -o "$out" "$HERE/sg-deskcomp.c" -lX11 -lXcomposite -lXdamage -lXfixes -lXrender -lXext -lm \
             || { echo "SKIP: cannot build the mutant"; exit 77; }
@@ -80,6 +81,8 @@ sleep 3
 i=0; while ! grep -q 'background=1' "\$D" 2>/dev/null && [ \$i -lt 40 ]; do sleep 0.25; i=\$((i + 1)); done
 "$WINE" deskcomp-probe.exe layered 600 100 128 &
 "$WINE" deskcomp-probe.exe argb 600 300 &
+# frosted over Main's right edge (white | green at x 500)
+"$WINE" deskcomp-probe.exe frosted 400 250 &
 sleep 3
 import -window root "$T/on.png"
 cp "\$D" "$T/dump.on"
@@ -121,6 +124,12 @@ is on 700 175 'r > 95 && r < 165 && g > 95 && g < 165 && b < 30' \
     && pass "a half-opaque layered window is blended over the desktop ($(px on 700 175))" || fail "layered: $(px on 700 175)"
 is on 700 375 'b > 35 && b < 95 && g > 160 && g < 220 && r < 30' \
     && pass "and a window with per-pixel alpha ($(px on 700 375))" || fail "per-pixel alpha: $(px on 700 375)"
+grep -E 'win 0x[0-9a-f]+ 400,250 ' "$T/dump.on" | grep -q 'acrylic=50' && is on 560 330 'r > 100 && r < 160 && g > 100 && g < 160' \
+    && pass "a frosted window (_SG_ACRYLIC 50) is half see-through ($(px on 560 330))" || fail "frosted: $(grep -E ' 400,250 ' "$T/dump.on") $(px on 560 330)"
+# across the edge below it: sharp, white then green, unless blurred
+db=$(( $(px on 497 330 | cut -d, -f3) - $(px on 503 330 | cut -d, -f3) ))
+[ "${db#-}" -lt 100 ] && pass "and what is below it is blurred (blue across the edge: $(px on 497 330) | $(px on 503 330))" \
+    || fail "not blurred: $(px on 497 330) | $(px on 503 330)"
 
 grep -E 'win 0x[0-9a-f]+ 600,480 ' "$T/dump.open" | grep -q 'anim=1' \
     && grep -E 'win 0x[0-9a-f]+ 600,480 ' "$T/dump.open" | tail -1 | grep -q 'anim=0' \
