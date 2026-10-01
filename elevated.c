@@ -48,6 +48,7 @@
  */
 #define _GNU_SOURCE
 #include "elevated.h"
+#include "decor.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -862,6 +863,69 @@ elevated_view_listen(struct cg_xwayland_view *xv)
 	wl_signal_add(&xs->events.request_maximize, &xv->request_maximize);
 	xv->request_activate.notify = handle_request_activate;
 	wl_signal_add(&xs->events.request_activate, &xv->request_activate);
+}
+
+/* The session's own Linux windows ask the same of their window manager: GTK 4
+ * and other programs that draw their own title bars move, resize, minimise
+ * and maximise themselves by asking (_NET_WM_MOVERESIZE, WM_CHANGE_STATE,
+ * _NET_WM_STATE). A maximised one leaves the taskbar's strip, and our title
+ * bar's when it has one. */
+static void
+handle_session_request_maximize(struct wl_listener *listener, void *data)
+{
+	struct cg_xwayland_view *xv = wl_container_of(listener, xv, request_maximize);
+	struct wlr_xwayland_surface *xs = xv->xwayland_surface;
+	struct cg_view *view = &xv->view;
+	bool want = xs->maximized_vert && xs->maximized_horz;
+	struct wlr_box box;
+	(void) data;
+
+	if (want == view->maximized || !view->wlr_surface) {
+		return;
+	}
+	view_get_layout_box(view, &box);
+	box.height -= DECOR_TASKBAR_H;
+	if (decor_has(view)) {
+		box.y += DECOR_TITLE_H;
+		box.height -= DECOR_TITLE_H;
+	}
+	if (want) {
+		view->restore = (struct wlr_box){view->lx, view->ly, xs->width, xs->height};
+		view->maximized = true;
+		wlr_xwayland_surface_configure(xs, box.x, box.y, box.width, box.height);
+		wlr_xwayland_surface_set_maximized(xs, true);
+		view_move_to(view, box.x, box.y);
+	} else {
+		view->maximized = false;
+		wlr_xwayland_surface_configure(xs, view->restore.x, view->restore.y, view->restore.width,
+					       view->restore.height);
+		wlr_xwayland_surface_set_maximized(xs, false);
+		view_move_to(view, view->restore.x, view->restore.y);
+	}
+}
+
+void
+session_view_listen(struct cg_xwayland_view *xv)
+{
+	struct wlr_xwayland_surface *xs = xv->xwayland_surface;
+
+	xv->request_move.notify = handle_request_move;
+	wl_signal_add(&xs->events.request_move, &xv->request_move);
+	xv->request_resize.notify = handle_request_resize;
+	wl_signal_add(&xs->events.request_resize, &xv->request_resize);
+	xv->request_minimize.notify = handle_request_minimize;
+	wl_signal_add(&xs->events.request_minimize, &xv->request_minimize);
+	xv->request_maximize.notify = handle_session_request_maximize;
+	wl_signal_add(&xs->events.request_maximize, &xv->request_maximize);
+}
+
+void
+session_view_unlisten(struct cg_xwayland_view *xv)
+{
+	wl_list_remove(&xv->request_move.link);
+	wl_list_remove(&xv->request_resize.link);
+	wl_list_remove(&xv->request_minimize.link);
+	wl_list_remove(&xv->request_maximize.link);
 }
 
 void

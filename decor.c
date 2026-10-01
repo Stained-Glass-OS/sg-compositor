@@ -418,6 +418,18 @@ decor_create(struct cg_view *view)
 	render(d);
 }
 
+bool
+decor_has(struct cg_view *view)
+{
+	struct cg_decor *d;
+	wl_list_for_each (d, &decors, link) {
+		if (d->view == view) {
+			return true;
+		}
+	}
+	return false;
+}
+
 void
 decor_destroy(struct cg_view *view)
 {

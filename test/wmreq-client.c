@@ -1,0 +1,53 @@
+/* A window that draws its own title bar, as GTK 4's do (no decorations
+ * wanted, _MOTIF_WM_HINTS), and asks the window manager to maximise and
+ * minimise it the standard way (test/wmreq-gate.sh).
+ *   wmreq-client max   -- ask maximised, then print WxH
+ *   wmreq-client min   -- ask to be minimised (WM_CHANGE_STATE IconicState) */
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+#include <X11/Xlib.h>
+#include <X11/Xatom.h>
+
+static void client_message(Display *d, Window w, const char *type, long a0, long a1, long a2)
+{
+	XEvent ev;
+	memset(&ev, 0, sizeof(ev));
+	ev.xclient.type = ClientMessage;
+	ev.xclient.window = w;
+	ev.xclient.message_type = XInternAtom(d, type, False);
+	ev.xclient.format = 32;
+	ev.xclient.data.l[0] = a0; ev.xclient.data.l[1] = a1; ev.xclient.data.l[2] = a2;
+	XSendEvent(d, DefaultRootWindow(d), False, SubstructureRedirectMask | SubstructureNotifyMask, &ev);
+	XFlush(d);
+}
+
+int main(int argc, char **argv)
+{
+	Display *d = XOpenDisplay(NULL);
+	Window w;
+	long motif[5] = { 2, 0, 0, 0, 0 };   /* flags: decorations; decorations: none */
+	XWindowAttributes a;
+	if (!d || argc < 2) return 2;
+	w = XCreateSimpleWindow(d, DefaultRootWindow(d), 0, 0, 300, 200, 0, 0, 0x00ff00);
+	XStoreName(d, w, "wmreq");
+	XChangeProperty(d, w, XInternAtom(d, "_MOTIF_WM_HINTS", False), XInternAtom(d, "_MOTIF_WM_HINTS", False), 32,
+			PropModeReplace, (unsigned char *) motif, 5);
+	XMapWindow(d, w);
+	XSync(d, False);
+	sleep(2);
+	if (!strcmp(argv[1], "max")) {
+		client_message(d, w, "_NET_WM_STATE", 1, XInternAtom(d, "_NET_WM_STATE_MAXIMIZED_VERT", False),
+			       XInternAtom(d, "_NET_WM_STATE_MAXIMIZED_HORZ", False));
+		sleep(2);
+		XGetWindowAttributes(d, w, &a);
+		printf("%dx%d\n", a.width, a.height);
+	} else {
+		client_message(d, w, "WM_CHANGE_STATE", 3 /* IconicState */, 0, 0);
+		sleep(2);
+		printf("asked\n");
+	}
+	fflush(stdout);
+	sleep(30);
+	return 0;
+}

@@ -18,7 +18,7 @@ install: build
 # The gate is sg-session's own session gate, run with this compositor hosting
 # the session instead of cage. Milestone 1 of ADR 0011 is exactly "that still
 # passes", so the gate is the same one, not a new one.
-test: test-session test-lock test-secure test-secure-dim test-xwindows test-privileged test-sas test-power test-elevated test-popup test-backdrop test-xfloat test-decor test-capture
+test: test-session test-lock test-secure test-secure-dim test-xwindows test-privileged test-sas test-power test-elevated test-popup test-backdrop test-xfloat test-decor test-capture test-wmreq
 
 test-session: build
 	@[ -d "$(SG_SESSION)" ] || { echo "sg-session checkout not found at $(SG_SESSION)"; exit 2; }
@@ -82,6 +82,10 @@ test-backdrop: build
 	@SG_COMPOSITOR_BIN=$(CURDIR)/$(BUILD)/sg-compositor sh test/backdrop-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc
 
 # An X11 window of a Linux program keeps the size it asks for, centred.
+.PHONY: test-wmreq
+test-wmreq: build
+	@SG_COMPOSITOR_BIN=$(CURDIR)/$(BUILD)/sg-compositor sh test/wmreq-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc
+
 .PHONY: test-capture
 test-capture: build
 	@SG_COMPOSITOR_BIN=$(CURDIR)/$(BUILD)/sg-compositor sh test/capture-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc

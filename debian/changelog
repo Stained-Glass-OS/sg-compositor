@@ -9,6 +9,11 @@ sg-compositor (0.2.0+sg16) unstable; urgency=medium
     screen is open. wlroots' own stays for privileged clients (Remote
     Desktop sees the lock screen). Test: make test-capture (mutant: no
     blanking).
+  * Linux programs that draw their own title bars (GTK 4: zenity, GNOME's
+    apps) move, resize, minimise and maximise themselves by asking, as with
+    any window manager (_NET_WM_MOVERESIZE, WM_CHANGE_STATE,
+    _NET_WM_STATE); a maximised one leaves the taskbar's strip. Test: make
+    test-wmreq (mutant: no handlers -- stays 300x200, never minimised).
 
  -- Stained Glass OS <ke7oxh@gmail.com>  Wed, 30 Sep 2026 23:40:00 +0000
 

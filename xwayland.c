@@ -231,6 +231,7 @@ handle_xwayland_surface_destroy(struct wl_listener *listener, void *data)
 		elevated_view_unlisten(xwayland_view);
 	} else {
 		wl_list_remove(&xwayland_view->request_configure.link);
+		session_view_unlisten(xwayland_view);
 	}
 	xwayland_view->xwayland_surface = NULL;
 
@@ -295,6 +296,7 @@ xwayland_view_create(struct cg_server *server, struct wlr_xwayland_surface *xway
 	} else {
 		xwayland_view->request_configure.notify = handle_xwayland_surface_request_configure;
 		wl_signal_add(&xwayland_surface->events.request_configure, &xwayland_view->request_configure);
+		session_view_listen(xwayland_view);
 	}
 }
 

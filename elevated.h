@@ -86,6 +86,9 @@ void elevated_focus_session(struct cg_server *server);
 struct cg_xwayland_view;
 void elevated_view_listen(struct cg_xwayland_view *xv);
 void elevated_view_unlisten(struct cg_xwayland_view *xv);
+/* the session's own Linux windows: move, resize, minimise, maximise as they ask */
+void session_view_listen(struct cg_xwayland_view *xv);
+void session_view_unlisten(struct cg_xwayland_view *xv);
 
 /* Interactive move and resize (_NET_WM_MOVERESIZE) of an elevated window. */
 bool elevated_grab_motion(struct cg_seat *seat, double lx, double ly);

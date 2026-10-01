@@ -14,6 +14,9 @@ struct cg_view;
  * window should have none. */
 void decor_create(struct cg_view *view);
 void decor_destroy(struct cg_view *view);
+/* the view has our title bar */
+bool decor_has(struct cg_view *view);
+#define DECOR_TASKBAR_H 40 /* the shell's taskbar: a maximized window stops above it */
 void decor_set_active(struct cg_view *view, bool active);
 void decor_set_fullscreen(struct cg_view *view, bool fullscreen);
 
