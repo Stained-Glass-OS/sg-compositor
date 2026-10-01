@@ -67,6 +67,7 @@
 #include <wlr/util/log.h>
 #include <wlr/xwayland.h>
 #include <wlr/xwayland/shell.h>
+#include <xcb/xproto.h>
 
 #include "seat.h"
 #include "server.h"
@@ -522,7 +523,11 @@ elevated_raise(struct cg_view *view)
 	if (!view->scene_tree) {
 		return;
 	}
+	/* The elevated X server routes the pointer by its own stacking: it
+	 * follows the screen's, or a click on a dialog reaches the window under
+	 * it (one whose X window was made later, as when Wine re-creates it). */
 	wlr_scene_node_raise_to_top(&view->scene_tree->node);
+	wlr_xwayland_surface_restack(xs, NULL, XCB_STACK_MODE_ABOVE);
 	wl_list_for_each_reverse (other, &view->server->views, link) {
 		struct wlr_xwayland_surface *p;
 		if (other == view || other->elevated != view->elevated || !other->scene_tree) {
@@ -531,6 +536,7 @@ elevated_raise(struct cg_view *view)
 		for (p = xsurface_of(other)->parent; p; p = p->parent) {
 			if (p == xs) {
 				wlr_scene_node_raise_to_top(&other->scene_tree->node);
+				wlr_xwayland_surface_restack(xsurface_of(other), NULL, XCB_STACK_MODE_ABOVE);
 				break;
 			}
 		}

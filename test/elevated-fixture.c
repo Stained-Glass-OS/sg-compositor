@@ -11,6 +11,13 @@
  *   elevated-fixture target LOG TITLE COLOUR
  *       The same with another title and colour: the session's own window.
  *
+ *   elevated-fixture dialog LOG
+ *       A window (cyan, 600,150 300x200) and its dialog (yellow, 650,200
+ *       200x100, transient for it) whose X window was made first -- below the
+ *       main one in the X server's stacking, as when Wine re-creates a GTK
+ *       program's main window. Appends "MAPPED" once both are shown, then
+ *       "CLICK main|dialog" for every left button press.
+ *
  *   elevated-fixture keypoll LOG
  *       A session keylogger that needs no focus: polls the X server's key
  *       state (what GetAsyncKeyState is built on) and appends "DOWN <keycode>"
@@ -106,6 +113,51 @@ target(const char *log, const char *title, const char *color)
 			fflush(f);
 		} else if (ev.type == FocusOut) {
 			fprintf(f, "FOCUS out\n");
+			fflush(f);
+		}
+	}
+}
+
+static int
+dialog(const char *log)
+{
+	Display *d = XOpenDisplay(NULL);
+	FILE *f = fopen(log, "a");
+	if (!d || !f) {
+		return 1;
+	}
+	int s = DefaultScreen(d);
+	XColor cyan, yellow, exact;
+	XAllocNamedColor(d, DefaultColormap(d, s), "#00ffff", &cyan, &exact);
+	XAllocNamedColor(d, DefaultColormap(d, s), "#ffff00", &yellow, &exact);
+	/* the dialog's X window first: the main one is created above it */
+	Window dlg = XCreateSimpleWindow(d, RootWindow(d, s), 650, 200, 200, 100, 0, 0, yellow.pixel);
+	Window main_w = XCreateSimpleWindow(d, RootWindow(d, s), 600, 150, 300, 200, 0, 0, cyan.pixel);
+	XSizeHints mh = {.flags = USPosition | PPosition, .x = 600, .y = 150};
+	XSizeHints dh = {.flags = USPosition | PPosition, .x = 650, .y = 200};
+	XWMHints wm = {.flags = InputHint, .input = True};
+	XSetWMNormalHints(d, main_w, &mh);
+	XSetWMNormalHints(d, dlg, &dh);
+	XStoreName(d, main_w, "sg-elevated-main");
+	XStoreName(d, dlg, "sg-elevated-dialog");
+	XSetWMHints(d, main_w, &wm);
+	XSetWMHints(d, dlg, &wm);
+	XSetTransientForHint(d, dlg, main_w);
+	XSelectInput(d, main_w, ButtonPressMask | ExposureMask);
+	XSelectInput(d, dlg, ButtonPressMask | ExposureMask);
+	XMapWindow(d, main_w);
+	XSync(d, False);
+	sleep(1);
+	XMapWindow(d, dlg);
+	XSync(d, False);
+	sleep(1);
+	fprintf(f, "MAPPED\n");
+	fflush(f);
+	for (;;) {
+		XEvent ev;
+		XNextEvent(d, &ev);
+		if (ev.type == ButtonPress && ev.xbutton.button == 1) {
+			fprintf(f, "CLICK %s\n", ev.xbutton.window == dlg ? "dialog" : "main");
 			fflush(f);
 		}
 	}
@@ -261,6 +313,9 @@ main(int argc, char **argv)
 	}
 	if (argc == 5 && !strcmp(argv[1], "target")) {
 		return target(argv[2], argv[3], argv[4]);
+	}
+	if (argc == 3 && !strcmp(argv[1], "dialog")) {
+		return dialog(argv[2]);
 	}
 	if (argc == 3 && !strcmp(argv[1], "keypoll")) {
 		return keypoll(argv[2]);

@@ -1,3 +1,17 @@
+sg-compositor (0.2.0+sg19) unstable; urgency=medium
+
+  * An elevated program's dialog takes clicks: the elevated X server now
+    stacks its windows as the screen shows them. The compositor raised a
+    dialog above its window on screen only, and the X server, which routes
+    the pointer by its own stacking, gave the clicks to the window under
+    it when that one's X window had been made later (Wine re-creates a
+    GTK program's main window): BleachBit's "Font check" took no clicks.
+    Test: make test-elevated, new section 5b (a dialog whose X window was
+    made first; mutant without the restack: the click goes to the main
+    window).
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Thu, 01 Oct 2026 08:45:00 +0000
+
 sg-compositor (0.2.0+sg18) unstable; urgency=medium
 
   * An X window larger than the screen is maximized above the taskbar and

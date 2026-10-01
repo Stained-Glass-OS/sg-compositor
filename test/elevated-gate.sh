@@ -15,6 +15,8 @@
 #   4. clipboard: elevated -> session text is offered; session -> elevated
 #      only after the user's own input in the elevated window, text only
 #   5. a lock hides it and keeps its keys; it comes back on unlock
+#   5b. a click on its dialog reaches the dialog, whatever order its X
+#      windows were made in (the X server's stacking follows the screen's)
 #   6. the display ends with the program; only SYSTEM or root may hand one over
 #
 # A build that puts the elevated program on the session's display must fail
@@ -265,6 +267,24 @@ sleep 1
 [ "$(ectl UNLOCK)" = "OK unlocked" ] || fail "UNLOCK refused"
 sleep 1
 case "$(row)" in *" shown "*) pass "unlocked: it is back" ;; *) fail "unlocked: [$(row)]" ;; esac
+
+# --- 5b. A click on its dialog reaches the dialog ---------------------------
+# The dialog's X window was made before its main window's (as when Wine
+# re-creates a GTK program's main window): the compositor shows the dialog on
+# top, and the elevated X server must route the click to it too, not to the
+# main window under it (BleachBit's "Font check" took no clicks).
+as_e DISPLAY="$EDPY" XAUTHORITY="$EAUTH" "$T/fx" dialog "$T/e/dialog.log" >/dev/null 2>&1 &
+_w=0; while ! grep -q '^MAPPED' "$T/e/dialog.log" 2>/dev/null && [ $_w -lt 30 ]; do sleep 0.5; _w=$((_w+1)); done
+sleep 1
+ptr m 750 250 d u
+ptr m 620 330 d u
+sleep 1
+if grep -qx 'CLICK dialog' "$T/e/dialog.log" 2>/dev/null; then pass "a click on its dialog reaches the dialog"
+else fail "a click on its dialog went to: $(sed -n 's/^CLICK //p' "$T/e/dialog.log" | head -1) [$(tr '\n' ' ' < "$T/e/dialog.log" 2>/dev/null)]"; fi
+if grep -qx 'CLICK main' "$T/e/dialog.log" 2>/dev/null; then pass "and a click beside the dialog, its main window"
+else fail "a click on the main window beside its dialog did not reach it"; fi
+sudo -n pkill -u "$EUSER" -f "$T/fx dialog"
+sleep 1
 
 # --- 6. Who may hand one over; the display ends with the program -----------
 refused=$(python3 - "$T/ctl.sock" <<'PY'
