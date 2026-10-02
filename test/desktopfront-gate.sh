@@ -25,7 +25,7 @@ cc -O2 -o "$T/wmreq-client" "$HERE/test/wmreq-client.c" -lX11 || { echo "SKIP: n
 # the "desktop": a blue window of explorer.exe's class titled "... Wine Desktop"
 WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 WLR_RENDERER=pixman \
     "$COMP" -L "$T/priv.sock" -C "$T/ctl.sock" -U "$(id -u)" -- \
-    sh -c "echo \$\$ > $T/client; echo \"\$DISPLAY\" > $T/dpy; xterm -class explorer.exe -T 'shell - Wine Desktop' -geometry 400x120+0+0 -bg '#0000ff' -fg '#0000ff' -e sleep 600 & echo up > $T/d; exec sleep 600" >"$T/log" 2>&1 &
+    sh -c "echo \$\$ > $T/client; echo \"\$DISPLAY\" > $T/dpy; $T/wmreq-client desktop > $T/desk.keys & echo up > $T/d; exec sleep 600" >"$T/log" 2>&1 &
 CP=$!
 _w=0; while [ ! -s "$T/d" ] && [ $_w -lt 50 ]; do sleep 0.2; _w=$((_w+1)); done
 sleep 3
@@ -64,13 +64,19 @@ grep -q asked "$T/act.out" && shot asked
 if command -v wtype >/dev/null; then
     WAYLAND_DISPLAY="$T/priv.sock" wtype -k Super_L; shot super
     [ "$(px super $CX $CY)" = "0,0,255" ] && ctl XWINDOWS | grep -q "^$ID shown - " \
-        && pass "the Windows key from a Linux window brings the desktop in front with the keyboard (Start can open)" \
+        && pass "the Windows key from a Linux window brings the desktop in front with the keyboard" \
         || fail "after the Windows key: $(px super $CX $CY) $(ctl XWINDOWS | tr '\n' '|')"
     # Alt+Tab from the Linux window: the shell's switcher, so the desktop too
     [ "$(ctl "XACTIVATE $ID")" = OK ] && sleep 1
     WAYLAND_DISPLAY="$T/priv.sock" wtype -M alt -k Tab -m alt; shot alttab
     [ "$(px alttab $CX $CY)" = "0,0,255" ] && pass "and so does Alt+Tab (the shell's window switcher)" \
         || fail "after Alt+Tab: $(px alttab $CX $CY) $(ctl XWINDOWS | tr '\n' '|')"
+    # the key itself reaches the desktop, pressed and released: sent with the
+    # focus change its press was lost (wtype cannot press the Windows key
+    # itself -- its press never arrives anywhere -- so Tab shows it)
+    grep -q '^press Tab' "$T/desk.keys" && grep -q '^release Tab' "$T/desk.keys" \
+        && pass "the desktop gets the key's press and release (Start, the switcher open)" \
+        || fail "keys the desktop got: $(tr '\n' ' ' < "$T/desk.keys"); the Linux window got: $(grep -v asked "$T/act.out" | tr '\n' ' ')"
 else echo "      (no wtype: the Windows key not checked)"; fi
 kill "$AP" 2>/dev/null
 [ $RC = 0 ] && echo "RESULT: PASS" || echo "RESULT: FAIL"

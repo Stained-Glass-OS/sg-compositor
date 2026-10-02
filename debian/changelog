@@ -3,6 +3,13 @@ sg-compositor (0.2.0+sg23) unstable; urgency=medium
   * A Linux program's title bar shows its icon (_NET_WM_ICON) at the left,
     as Wine's windows do, the title beside it. Test: test/decor-gate.sh
     (mutant NO_ICON fails it).
+  * The Windows key from a Linux program's window opens Start on its first
+    press (sg22 brought the desktop forward, but the key's press went with
+    the focus change and was lost -- only its release reached the shell):
+    the press is held until the next key event, after X's focus has moved.
+    Win+E and Alt+Tab likewise. QA VM: one press from Linux Firefox opens
+    Start, Win+E File Explorer. Test: test/desktopfront-gate.sh (the
+    desktop gets the key's press and release; mutant SUPER_RACE fails it).
 
  -- Stained Glass OS <ke7oxh@gmail.com>  Fri, 02 Oct 2026 08:00:00 +0000
 

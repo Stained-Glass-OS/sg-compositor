@@ -417,6 +417,14 @@ handle_key_event(struct wlr_keyboard *keyboard, struct cg_seat *seat, void *data
 
 	bool handled = false;
 	uint32_t modifiers = wlr_keyboard_get_modifiers(keyboard);
+	if (seat->held_press_keycode) {
+		/* a shell key's press, held while the focus moved (below): it goes
+		 * before this event, to the window that has the keyboard now */
+		uint32_t held = seat->held_press_keycode;
+		seat->held_press_keycode = 0;
+		wlr_seat_set_keyboard(seat->seat, keyboard);
+		wlr_seat_keyboard_notify_key(seat->seat, event->time_msec, held, WL_KEYBOARD_KEY_STATE_PRESSED);
+	}
 	if (event->state == WL_KEYBOARD_KEY_STATE_RELEASED && take_consumed_release(keycode)) {
 		handled = true;
 		if (seat->switch_keycode == keycode) {
@@ -455,7 +463,18 @@ handle_key_event(struct wlr_keyboard *keyboard, struct cg_seat *seat, void *data
 		/* the Windows key, Alt+Tab and Ctrl+Shift+Esc are the shell's:
 		 * from a Linux program's window, the desktop takes the keyboard
 		 * first (session_x11.c) */
-		session_x11_super(seat->server, seat_get_focus(seat));
+		seat->enter_skip_keycode = event->keycode;
+		if (session_x11_super(seat->server, seat_get_focus(seat))) {
+#ifndef SG_MUTANT_SUPER_RACE
+			/* its press goes with the next key event, not now: X's focus
+			 * moves with a request of its own, and a press sent with
+			 * it was lost -- only the release reached the shell, and
+			 * Start did not open */
+			seat->held_press_keycode = event->keycode;
+			handled = true;
+#endif
+		}
+		seat->enter_skip_keycode = 0;
 	}
 	if (!handled && event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
 		/* sg-compositor: the user typing into an elevated window is
@@ -1187,8 +1206,17 @@ seat_set_focus(struct cg_seat *seat, struct cg_view *view)
 
 	struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(wlr_seat);
 	if (keyboard) {
-		wlr_seat_keyboard_notify_enter(wlr_seat, view->wlr_surface, keyboard->keycodes, keyboard->num_keycodes,
-					       &keyboard->modifiers);
+		uint32_t keys[WLR_KEYBOARD_KEYS_CAP];
+		size_t n = 0;
+		for (size_t i = 0; i < keyboard->num_keycodes && n < WLR_KEYBOARD_KEYS_CAP; i++) {
+#ifndef SG_MUTANT_ENTER_WITH_KEY
+			if (seat->enter_skip_keycode && keyboard->keycodes[i] == seat->enter_skip_keycode) {
+				continue;
+			}
+#endif
+			keys[n++] = keyboard->keycodes[i];
+		}
+		wlr_seat_keyboard_notify_enter(wlr_seat, view->wlr_surface, keys, n, &keyboard->modifiers);
 	} else {
 		wlr_seat_keyboard_notify_enter(wlr_seat, view->wlr_surface, NULL, 0, NULL);
 	}

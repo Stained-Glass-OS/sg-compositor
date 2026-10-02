@@ -17,10 +17,12 @@
 #include "session_x11.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 #include <wlr/types/wlr_scene.h>
 #include <wlr/xwayland.h>
+#include <xcb/xcb.h>
 
 #include "elevated.h"
 #include "lock.h"
@@ -176,7 +178,23 @@ session_x11_super(struct cg_server *server, struct cg_view *focus)
 	if (focus->type == CAGE_XWAYLAND_VIEW && xwayland_view_is_shell_desktop(focus)) {
 		return false;
 	}
-	return session_x11_desktop_front(server);
+	if (!session_x11_desktop_front(server)) {
+		return false;
+	}
+	/* X's input focus moves with a request on the window manager's own X
+	 * connection, the key goes to Xwayland over Wayland: the request is
+	 * made to arrive first (a round trip), else the key's press went to the
+	 * window it left and only its release reached the shell -- no Start */
+	xcb_connection_t *c = server->xwayland ? wlr_xwayland_get_xwm_connection(server->xwayland) : NULL;
+#ifndef SG_MUTANT_SUPER_RACE
+	if (c) {
+		xcb_flush(c);
+		free(xcb_get_input_focus_reply(c, xcb_get_input_focus(c), NULL));
+	}
+#else
+	(void) c;
+#endif
+	return true;
 }
 
 bool

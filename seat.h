@@ -15,6 +15,12 @@
 #define XCURSOR_SIZE 24
 
 struct cg_seat {
+	/* sg-compositor: a key left out of the keys held when focus moves (the
+	 * shell's key that moved it: its press must reach the new window) */
+	uint32_t enter_skip_keycode;
+	/* ...whose press is held until the next key event, so it reaches the
+	 * new window after X's focus has moved there (0: none) */
+	uint32_t held_press_keycode;
 	struct wlr_seat *seat;
 	struct cg_server *server;
 	struct wl_listener destroy;
