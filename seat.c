@@ -7,6 +7,7 @@
  */
 
 #define _POSIX_C_SOURCE 200809L
+#define _DEFAULT_SOURCE /* closefrom */
 
 #include "config.h"
 
@@ -14,6 +15,8 @@
 #include <linux/input-event-codes.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #include <wayland-server-core.h>
 #include <wlr/backend.h>
 #include <wlr/backend/multi.h>
@@ -357,10 +360,49 @@ mark_consumed(xkb_keycode_t keycode)
 	}
 }
 
+/* The volume keys: sg-settingsctl (sg-session) steps the default output and
+ * plays the chime at the new level, or toggles mute. Windows' shell answers
+ * them; nothing here did, and a laptop's volume keys did nothing (David
+ * 2026-10-02). Not waited for: the keyboard stays the compositor's. */
+#ifndef SG_MUTANT_NO_VOLUME_KEYS
+static void
+volume_key(const char *verb, const char *dir)
+{
+	pid_t pid = fork();
+	if (pid < 0) {
+		return;
+	}
+	if (pid == 0) {
+		if (fork() == 0) {
+			setsid();
+			closefrom(3);
+			if (dir) {
+				execlp("sg-settingsctl", "sg-settingsctl", "sound", verb, dir, "--chime", (char *) NULL);
+			} else {
+				execlp("sg-settingsctl", "sg-settingsctl", "sound", verb, (char *) NULL);
+			}
+			_exit(127);
+		}
+		_exit(0);
+	}
+	waitpid(pid, NULL, 0);
+}
+#endif
+
 static bool
 handle_reserved_key(struct cg_seat *seat, uint32_t modifiers, const xkb_keysym_t *syms, int nsyms)
 {
 	for (int i = 0; i < nsyms; i++) {
+#ifndef SG_MUTANT_NO_VOLUME_KEYS
+		if (syms[i] == XKB_KEY_XF86AudioRaiseVolume || syms[i] == XKB_KEY_XF86AudioLowerVolume) {
+			volume_key("step", syms[i] == XKB_KEY_XF86AudioRaiseVolume ? "up" : "down");
+			return true;
+		}
+		if (syms[i] == XKB_KEY_XF86AudioMute) {
+			volume_key("mute-toggle", NULL);
+			return true;
+		}
+#endif
 		bool win_l = (modifiers & WLR_MODIFIER_LOGO) && (syms[i] == XKB_KEY_l || syms[i] == XKB_KEY_L);
 		bool sas = (modifiers & WLR_MODIFIER_CTRL) && (modifiers & WLR_MODIFIER_ALT) &&
 			   (syms[i] == XKB_KEY_Delete || syms[i] == XKB_KEY_KP_Delete);

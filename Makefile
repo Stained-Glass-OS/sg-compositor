@@ -55,6 +55,11 @@ test-xwindows: build
 test-privileged: build
 	@sh test/privileged-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc
 
+# The volume keys: sg-settingsctl steps the volume (with the chime) or mutes.
+.PHONY: test-volkeys
+test-volkeys: build
+	@SG_COMPOSITOR_BIN=$(CURDIR)/$(BUILD)/sg-compositor sh test/volkeys-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc
+
 # Reserved keys: Win+L and Ctrl+Alt+Del.
 test-sas: build
 	@sh test/sas-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc
