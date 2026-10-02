@@ -32,7 +32,7 @@ unset DISPLAY WAYLAND_DISPLAY
 
 if [ "${1:-}" = --mutants ]; then
     rc=0
-    for m in NOSHADOWS OPAQUE NOEFFECTS NOFROST NODIRECT; do
+    for m in NOSHADOWS OPAQUE NOEFFECTS NOFROST NODIRECT NO_MINRECT; do
         out=$(mktemp /var/tmp/sg-deskcomp-mutant.XXXXXX)
         cc -std=c11 -O2 -DSG_MUTANT_$m -o "$out" "$HERE/sg-deskcomp.c" -lX11 -lXcomposite -lXdamage -lXfixes -lXrender -lXext -lm \
             || { echo "SKIP: cannot build the mutant"; exit 77; }
@@ -103,6 +103,7 @@ cp "\$D" "$T/dump.settled"
 "$WINE" deskcomp-probe.exe minimize Main 2>/dev/null &
 i=0; : > "$T/dump.min"
 while [ \$i -lt 40 ]; do cat "\$D" >> "$T/dump.min" 2>/dev/null; sleep 0.03; i=\$((i + 1)); done
+xprop -id \$(xwininfo -root -tree | awk '\$2 == "\"Main\":" { print \$1; exit }') _SG_MINRECT > "$T/minrect" 2>&1
 sleep 1
 # a full-screen window on top: X draws it itself, the canvas hidden; gone, the canvas is back
 "$WINE" deskcomp-probe.exe full & FP=\$!
@@ -148,6 +149,12 @@ awk -v m="${wob:-0}" 'BEGIN { exit !(m > 2) }' && pass "a dragged window wobbles
 grep -E 'win 0x[0-9a-f]+ 2[0-9][0-9],1[0-9][0-9] 400x300 .*kind=1' "$T/dump.settled" | grep -q 'wobble=0.0' \
     && pass "and settles where it was dropped ($(grep -E '400x300 .*kind=1' "$T/dump.settled" | grep -oE ' [0-9]+,[0-9]+ ' | head -1))" \
     || fail "settled: $(grep 'kind=1' "$T/dump.settled" | head -2)"
+# toward Main's own taskbar button (wine-sg 0751), not the bar's middle
+mx=$(sed -n 's/.*= \([0-9-]*\), [0-9-]*, \([0-9-]*\), [0-9-]*$/\1 \2/p' "$T/minrect" | awk '{ print int($1 + $2 / 2) }')
+tx=$(grep 'anim=3 ghost=1' "$T/dump.min" | sed -n 's/.*target=\([0-9-]*\),.*/\1/p' | head -1)
+[ -n "$mx" ] && [ -n "$tx" ] && [ $((tx - mx)) -ge -1 ] && [ $((tx - mx)) -le 1 ] \
+    && pass "it goes to its own taskbar button (x $tx, _SG_MINRECT's middle $mx)" \
+    || fail "minimize target: ${tx:-none}, button: $(cat "$T/minrect")"
 grep -q 'anim=3 ghost=1' "$T/dump.min" && pass "a minimized window's picture shrinks into the taskbar (a lamp)" \
     || fail "minimize: $(grep 'kind=1' "$T/dump.min" | sort -u | head -3)"
 

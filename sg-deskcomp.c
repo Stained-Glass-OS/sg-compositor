@@ -86,6 +86,7 @@ struct win {
 	double last_move;           /* when it last moved (translucent while moving, wobble grabs) */
 	int wobbling, anchor;
 	unsigned long acrylic;      /* _SG_ACRYLIC: frosted, this opaque in percent (0: not) */
+	int has_minrect, minrect[4];  /* _SG_MINRECT: its taskbar button, x y w h (wine-sg 0751) */
 	float ox[GRID * GRID], oy[GRID * GRID], vx[GRID * GRID], vy[GRID * GRID];
 };
 
@@ -101,7 +102,7 @@ static XserverRegion damage_all;
 static int damage_event, damage_error, xfixes_event, xfixes_error, shape_event, shape_error;
 static struct win *wins;
 static int nwins, capwins;
-static Atom atom_shadow, atom_opacity, atom_bgpixmap, atom_acrylic;
+static Atom atom_shadow, atom_opacity, atom_bgpixmap, atom_acrylic, atom_minrect;
 static const char *dump_path;
 static volatile sig_atomic_t quit;
 static int trapped;
@@ -203,6 +204,25 @@ static unsigned long prop_card(Window w, Atom prop, Atom type, unsigned long def
 	return v;
 }
 
+/* where the window's taskbar button is, as the shell says (wine-sg 0751) */
+static void read_minrect(struct win *w)
+{
+	Atom actual;
+	int fmt;
+	unsigned long n, left;
+	unsigned char *data = NULL;
+	w->has_minrect = 0;
+#ifdef SG_MUTANT_NO_MINRECT
+	return;
+#endif
+	if (XGetWindowProperty(dpy, w->id, atom_minrect, 0, 4, False, XA_CARDINAL, &actual, &fmt, &n, &left, &data) == Success &&
+	    data && n == 4 && fmt == 32) {
+		for (int i = 0; i < 4; i++) w->minrect[i] = (int)((long *)data)[i];   /* sign-extended longs */
+		w->has_minrect = w->minrect[2] > 0 && w->minrect[3] > 0;
+	}
+	if (data) XFree(data);
+}
+
 /* the shadow a window has: wine-sg 0744 says, from its styles */
 static enum kind window_kind(Window w)
 {
@@ -284,7 +304,14 @@ static void extents(struct win *w, XRectangle *r)
 		for (int i = 0; i < GRID * GRID; i++) m = fmaxf(m, fmaxf(fabsf(w->ox[i]), fabsf(w->oy[i])));
 		left -= (int)m + 2; top -= (int)m + 2; right += (int)m + 2; bottom += (int)m + 2;
 	}
-	if (w->anim == ANIM_MINIMIZE || w->anim == ANIM_RESTORE) bottom = dh;   /* down into the taskbar */
+	if (w->anim == ANIM_MINIMIZE || w->anim == ANIM_RESTORE) {   /* down into the taskbar, to its button */
+		bottom = dh;
+		if (w->has_minrect) {
+			if (left > w->minrect[0]) left = w->minrect[0];
+			if (right < w->minrect[0] + w->minrect[2]) right = w->minrect[0] + w->minrect[2];
+			if (top > w->minrect[1]) top = w->minrect[1];
+		}
+	}
 	if (left < 0) left = 0;
 	if (top < 0) top = 0;
 	if (right > dw) right = dw;
@@ -533,9 +560,17 @@ static double anim_length(struct win *w)
 	return w->anim == ANIM_MINIMIZE || w->anim == ANIM_RESTORE ? 0.32 : 0.20;
 }
 
-/* where a minimizing window goes: the taskbar, under the window */
+/* where a minimizing window goes: its own taskbar button, as Windows'
+ * animation does (David 2026-10-01: always the middle); without one, the
+ * taskbar under the window */
 static void taskbar_target(struct win *w, double *cx, double *top, double *width)
 {
+	if (w->has_minrect) {
+		*cx = w->minrect[0] + w->minrect[2] / 2.0;
+		*top = w->minrect[1] + w->minrect[3] / 2.0 - 4;
+		*width = w->minrect[2] < 64 ? w->minrect[2] : 64;
+		return;
+	}
 	*cx = w->x + (w->w + 2 * w->bw) / 2.0;
 	if (*cx < 60) *cx = 60;
 	if (*cx > dw - 60) *cx = dw - 60;
@@ -833,11 +868,17 @@ static void dump(void)
 	        opt_shadows, opt_shadow, opt_anim, opt_open, opt_minimize, opt_wobbly, opt_moving);
 	for (int i = 0; i < nwins; i++) {
 		float m = 0;
+		char target[32] = "-";
 		for (int j = 0; j < GRID * GRID; j++) m = fmaxf(m, fmaxf(fabsf(wins[i].ox[j]), fabsf(wins[i].oy[j])));
-		fprintf(f, "win 0x%lx %d,%d %dx%d mapped=%d managed=%d argb=%d kind=%d opacity=%lu anim=%d ghost=%d wobble=%.1f shadow=%d acrylic=%lu\n",
+		if (wins[i].anim == ANIM_MINIMIZE || wins[i].anim == ANIM_RESTORE) {
+			double cx, ty, tw;
+			taskbar_target(&wins[i], &cx, &ty, &tw);
+			snprintf(target, sizeof(target), "%d,%d", (int)cx, (int)ty);
+		}
+		fprintf(f, "win 0x%lx %d,%d %dx%d mapped=%d managed=%d argb=%d kind=%d opacity=%lu anim=%d ghost=%d wobble=%.1f shadow=%d acrylic=%lu target=%s\n",
 		        wins[i].id, wins[i].x, wins[i].y, wins[i].w, wins[i].h, wins[i].mapped, wins[i].managed, wins[i].argb,
 		        wins[i].kind, wins[i].opacity, wins[i].anim, wins[i].ghost, m, has_shadow(&wins[i]) && wins[i].mapped,
-		        wins[i].acrylic);
+		        wins[i].acrylic, target);
 	}
 	fclose(f);
 	rename(tmp, dump_path);
@@ -984,6 +1025,7 @@ static void on_configure(XConfigureEvent *ce)
 	minimizing = w->x > OFFSCREEN && ce->x <= OFFSCREEN;
 	restoring = w->x <= OFFSCREEN && ce->x > OFFSCREEN;
 	damage_win(w);
+	if (minimizing || restoring) read_minrect(w);
 	if (minimizing && w->mapped && w->pict && want_minimize() && w->kind == KIND_FRAMED) {
 		make_ghost(w, ANIM_MINIMIZE);
 		w = find(ce->window);
@@ -1038,6 +1080,7 @@ int main(int argc, char **argv)
 	atom_shadow = XInternAtom(dpy, "_SG_SHADOW", False);
 	atom_bgpixmap = XInternAtom(dpy, "_SG_DESKTOP_PIXMAP", False);
 	atom_acrylic = XInternAtom(dpy, "_SG_ACRYLIC", False);
+	atom_minrect = XInternAtom(dpy, "_SG_MINRECT", False);
 	argb_format = XRenderFindStandardFormat(dpy, PictStandardARGB32);
 	a8_format = XRenderFindStandardFormat(dpy, PictStandardA8);
 	damage_all = XFixesCreateRegion(dpy, NULL, 0);
