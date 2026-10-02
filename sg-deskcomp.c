@@ -1000,6 +1000,12 @@ static void check_direct(void)
 		trapped = 0;
 		XCompositeRedirectWindow(dpy, direct, CompositeRedirectManual);
 		XSync(dpy, False);
+		/* no longer direct before its pictures: get_pictures skips the
+		 * direct window, and the window left full screen was never drawn
+		 * again (Firefox after F11, 2026-10-02) */
+#ifndef SG_MUTANT_DIRECT_STALE
+		direct = 0;
+#endif
 		if (w) { w->managed = !trapped; get_pictures(w); }
 		XMapRaised(dpy, canvas);
 		direct = 0;

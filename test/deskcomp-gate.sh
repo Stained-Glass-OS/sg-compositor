@@ -13,7 +13,7 @@
 #     with per-pixel alpha too; a frosted one (wine-sg 0745's _SG_ACRYLIC:
 #     the taskbar with "Transparency effects") blurs what is below it;
 #   - a full-screen window on top is drawn by X itself (no copy, the canvas
-#     hidden), and composited again once it is gone;
+#     hidden), and composited again once it is gone or leaves full screen;
 #   - a new window fades in (open=fade); a dragged window wobbles and settles
 #     where it was dropped (wobbly=1); a minimized one shrinks into the
 #     taskbar, its picture kept for the animation (minimize=lamp).
@@ -32,7 +32,7 @@ unset DISPLAY WAYLAND_DISPLAY
 
 if [ "${1:-}" = --mutants ]; then
     rc=0
-    for m in NOSHADOWS OPAQUE NOEFFECTS NOFROST NODIRECT NO_MINRECT; do
+    for m in NOSHADOWS OPAQUE NOEFFECTS NOFROST NODIRECT DIRECT_STALE NO_MINRECT; do
         out=$(mktemp /var/tmp/sg-deskcomp-mutant.XXXXXX)
         cc -std=c11 -O2 -DSG_MUTANT_$m -o "$out" "$HERE/sg-deskcomp.c" -lX11 -lXcomposite -lXdamage -lXfixes -lXrender -lXext -lm \
             || { echo "SKIP: cannot build the mutant"; exit 77; }
@@ -112,6 +112,11 @@ cp "\$D" "$T/dump.full"; xwininfo -root -tree | grep '"sg-deskcomp"' | awk '{ pr
 xwininfo -id \$(cat "$T/canvas.id") 2>/dev/null | grep 'Map State' > "$T/canvas.full"
 kill \$FP; sleep 3
 cp "\$D" "$T/dump.back"; xwininfo -id \$(cat "$T/canvas.id") 2>/dev/null | grep 'Map State' > "$T/canvas.back"
+# a full-screen window that leaves full screen (Firefox after F11) is drawn again
+"$WINE" deskcomp-probe.exe shrink & SP=\$!
+sleep 1.5; cp "\$D" "$T/dump.shrinkfull"; sleep 3
+import -window root "$T/shrunk.png"; cp "\$D" "$T/dump.shrunk"
+kill \$SP; sleep 1
 kill \$CP; sleep 1.5
 import -window root "$T/off.png"
 xwininfo -root -tree > "$T/tree.off"
@@ -163,6 +168,9 @@ grep -q 'direct=0x[1-9a-f]' "$T/dump.full" && grep -q 'IsUnMapped' "$T/canvas.fu
     || fail "full screen: $(grep -o 'direct=0x[0-9a-f]*' "$T/dump.full") canvas $(cat "$T/canvas.full")"
 grep -q 'direct=0x0' "$T/dump.back" && grep -q 'IsViewable' "$T/canvas.back" \
     && pass "and once it is gone the canvas is back" || fail "after full screen: $(grep -o 'direct=0x[0-9a-f]*' "$T/dump.back") canvas $(cat "$T/canvas.back")"
+grep -q 'direct=0x[1-9a-f]' "$T/dump.shrinkfull" && grep -q 'direct=0x0' "$T/dump.shrunk" && is shrunk 450 300 'r > 240 && g < 15 && b > 240' \
+    && pass "a window leaving full screen is composited again ($(px shrunk 450 300))" \
+    || fail "after leaving full screen: $(grep -o 'direct=0x[0-9a-f]*' "$T/dump.shrinkfull") $(grep -o 'direct=0x[0-9a-f]*' "$T/dump.shrunk") $(px shrunk 450 300)"
 grep -q '"sg-deskcomp"' "$T/tree.off" && fail "the canvas outlived sg-deskcomp" || pass "sg-deskcomp gone: its canvas too"
 is off 300 460 'g == 255 && r == 0' && is off 700 30 'g == 255 && r == 0' \
     && pass "and X draws the desktop again ($(px off 300 460))" || fail "after: $(px off 300 460) $(px off 700 30)"

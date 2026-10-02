@@ -5,6 +5,8 @@
  *   deskcomp-probe minimize TITLE        minimize that window, and exit
  *   deskcomp-probe frosted X Y           a red popup, 200x150, frosted at 50% (__wine_sg_acrylic, wine-sg 0745)
  *   deskcomp-probe full                  a white popup over the whole screen, on top
+ *   deskcomp-probe shrink                a magenta one over the whole screen that, after
+ *                                        2 s, leaves full screen: 300x200 at 300,200
  * Each stays until killed. (Built with mingw-w64; runs in wine-sg.) */
 #include <windows.h>
 
@@ -20,6 +22,12 @@ static LRESULT CALLBACK proc(HWND h, UINT m, WPARAM w, LPARAM l)
         FillRect(dc, &ps.rcPaint, b);
         DeleteObject(b);
         EndPaint(h, &ps);
+        return 0;
+    }
+    if (m == WM_TIMER)
+    {
+        KillTimer(h, 1);
+        SetWindowPos(h, 0, 300, 200, 300, 200, SWP_NOZORDER | SWP_NOACTIVATE);
         return 0;
     }
     if (m == WM_DESTROY) PostQuitMessage(0);
@@ -45,6 +53,13 @@ int wmain(int argc, WCHAR **argv)
     if (argc >= 2 && !lstrcmpW(argv[1], L"full"))
         h = CreateWindowExW(WS_EX_TOPMOST, L"deskcomp", L"full", WS_POPUP | WS_VISIBLE, 0, 0,
                             GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN), 0, 0, 0, 0);
+    else if (argc >= 2 && !lstrcmpW(argv[1], L"shrink"))
+    {
+        fill = RGB(255, 0, 255);
+        h = CreateWindowExW(WS_EX_TOPMOST, L"deskcomp", L"shrink", WS_POPUP | WS_VISIBLE, 0, 0,
+                            GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN), 0, 0, 0, 0);
+        SetTimer(h, 1, 2000, 0);
+    }
     else if (argc >= 4 && !lstrcmpW(argv[1], L"frosted"))
     {
         fill = RGB(255, 0, 0);

@@ -1,3 +1,14 @@
+sg-compositor (0.2.0+sg25) unstable; urgency=medium
+
+  * sg-deskcomp draws a window again once it leaves full screen: the
+    window X drew itself while full screen was still taken for that one
+    when its pictures were made again, and none were -- Firefox after a
+    second F11 (or a video's full-screen button) was gone, only the
+    desktop shown (David 2026-10-02). Test: test/deskcomp-gate.sh (a window
+    that leaves full screen is composited again; mutant DIRECT_STALE).
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Fri, 02 Oct 2026 19:30:00 +0000
+
 sg-compositor (0.2.0+sg24) unstable; urgency=medium
 
   * The volume keys work: Volume Up and Down step the default output 5
