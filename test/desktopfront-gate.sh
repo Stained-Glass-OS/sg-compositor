@@ -66,6 +66,11 @@ if command -v wtype >/dev/null; then
     [ "$(px super $CX $CY)" = "0,0,255" ] && ctl XWINDOWS | grep -q "^$ID shown - " \
         && pass "the Windows key from a Linux window brings the desktop in front with the keyboard (Start can open)" \
         || fail "after the Windows key: $(px super $CX $CY) $(ctl XWINDOWS | tr '\n' '|')"
+    # Alt+Tab from the Linux window: the shell's switcher, so the desktop too
+    [ "$(ctl "XACTIVATE $ID")" = OK ] && sleep 1
+    WAYLAND_DISPLAY="$T/priv.sock" wtype -M alt -k Tab -m alt; shot alttab
+    [ "$(px alttab $CX $CY)" = "0,0,255" ] && pass "and so does Alt+Tab (the shell's window switcher)" \
+        || fail "after Alt+Tab: $(px alttab $CX $CY) $(ctl XWINDOWS | tr '\n' '|')"
 else echo "      (no wtype: the Windows key not checked)"; fi
 kill "$AP" 2>/dev/null
 [ $RC = 0 ] && echo "RESULT: PASS" || echo "RESULT: FAIL"

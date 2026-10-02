@@ -5,9 +5,9 @@ sg-compositor (0.2.0+sg22) unstable; urgency=medium
     buttons and #e3e3e3 edge, as SG Office's now are too, not 46 px
     buttons and a dark grey line. Test: test/decor-gate.sh (mutant
     WIDE_BUTTONS fails it).
-  * The Windows key is the shell's from a Linux program's window too: Start,
-    Win+E, Win+R, Win+Tab and the rest reached the Linux program and Start
-    never opened (QA 2026-10-02). The desktop comes forward with the
+  * The Windows key, Alt+Tab and Ctrl+Shift+Esc are the shell's from a Linux
+    program's window too: Start, Win+E, Win+R, Win+Tab, the window switcher
+    and Task Manager reached the Linux program instead (QA 2026-10-02). The desktop comes forward with the
     keyboard first; an elevated window, the lock screen and a consent
     prompt keep it. Test: test/desktopfront-gate.sh (mutant SUPER_STAYS
     fails it).
