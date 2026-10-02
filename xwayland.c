@@ -164,11 +164,50 @@ handle_xwayland_surface_request_configure(struct wl_listener *listener, void *da
 	}
 }
 
+/* sg-compositor: a Linux program's window that Wine put into a window of its
+ * own (wine-sg's embedding, winex11 sg_embed.c) is no longer ours to manage.
+ * wlroots' window manager still listens to it, and a focus change into it
+ * (Wine giving the program the keyboard) was undone at once -- "X clients
+ * must not change the focus behind the compositor's back" -- so the program
+ * got no keys. Not listened to any more; listened to again should it come
+ * back to the root as a top-level (wlroots' own mask, xwm.c). */
+static void
+xwm_listen(struct cg_view *view, bool on)
+{
+#if CAGE_HAS_XWAYLAND
+	struct wlr_xwayland_surface *xs = xwayland_view_from_view(view)->xwayland_surface;
+	xcb_connection_t *c = view->server->xwayland ? wlr_xwayland_get_xwm_connection(view->server->xwayland) : NULL;
+	xcb_query_tree_reply_t *tree;
+	uint32_t mask = XCB_EVENT_MASK_FOCUS_CHANGE | XCB_EVENT_MASK_PROPERTY_CHANGE;
+
+	if (!c || !xs || xs->override_redirect || view->elevated) {
+		return;
+	}
+	if (!on) {
+		if (!(tree = xcb_query_tree_reply(c, xcb_query_tree(c, xs->window_id), NULL))) {
+			return;
+		}
+		on = tree->parent == tree->root;   /* an ordinary unmap: still ours */
+		free(tree);
+		if (on) {
+			return;
+		}
+		mask = 0;
+	}
+#ifndef SG_MUTANT_EMBED_FOCUS_FIGHT
+	xcb_change_window_attributes(c, xs->window_id, XCB_CW_EVENT_MASK, &mask);
+	xcb_flush(c);
+#endif
+#endif
+}
+
 static void
 handle_xwayland_surface_unmap(struct wl_listener *listener, void *data)
 {
 	struct cg_xwayland_view *xwayland_view = wl_container_of(listener, xwayland_view, unmap);
 	struct cg_view *view = &xwayland_view->view;
+
+	xwm_listen(view, false);
 
 	if (xwayland_view->or_geometry) {
 		wl_list_remove(&xwayland_view->set_geometry.link);
@@ -194,6 +233,7 @@ handle_xwayland_surface_map(struct wl_listener *listener, void *data)
 		}
 	}
 
+	xwm_listen(view, true);
 	view_map(view, xwayland_view->xwayland_surface->surface);
 
 	/* sg-compositor: a managed window is where the compositor put it, in X
