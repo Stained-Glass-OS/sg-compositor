@@ -23,8 +23,10 @@
 #include <drm_fourcc.h>
 #include <ft2build.h>
 #include FT_FREETYPE_H
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <wlr/interfaces/wlr_buffer.h>
 #include <wlr/types/wlr_cursor.h>
 #include <wlr/types/wlr_scene.h>
@@ -355,16 +357,69 @@ decor_of(struct cg_view *view)
 	return NULL;
 }
 
+/* Dark mode (Settings > Personalization > Colors), as sg-settingsctl writes
+ * it for GTK: gtk-application-prefer-dark-theme in the user's gtk-3.0
+ * settings.ini. A Linux program's bar was light in dark mode until Wine
+ * framed it -- Kate's title bar went light, then dark (David 2026-10-02).
+ * Read again when the file changes. */
+static bool
+dark_mode(void)
+{
+	static bool dark;
+	static struct timespec seen;
+	char path[512];
+	const char *cfg = getenv("XDG_CONFIG_HOME"), *home = getenv("HOME");
+	struct stat st;
+
+#ifdef SG_MUTANT_DECOR_ALWAYS_LIGHT
+	return false;
+#endif
+	if (cfg && *cfg) {
+		snprintf(path, sizeof(path), "%s/gtk-3.0/settings.ini", cfg);
+	} else if (home) {
+		snprintf(path, sizeof(path), "%s/.config/gtk-3.0/settings.ini", home);
+	} else {
+		return false;
+	}
+	if (stat(path, &st) != 0) {
+		return dark = false;
+	}
+	if (st.st_mtim.tv_sec == seen.tv_sec && st.st_mtim.tv_nsec == seen.tv_nsec) {
+		return dark;
+	}
+	seen = st.st_mtim;
+	dark = false;
+	FILE *f = fopen(path, "r");
+	if (f) {
+		char line[256];
+		while (fgets(line, sizeof(line), f)) {
+			char *v = strchr(line, '=');
+			if (v && !strncmp(line, "gtk-application-prefer-dark-theme", 33)) {
+				v++;
+				while (*v == ' ') {
+					v++;
+				}
+				dark = !strncmp(v, "true", 4) || *v == '1';
+			}
+		}
+		fclose(f);
+	}
+	return dark;
+}
+
 static void
 render(struct cg_decor *d)
 {
 	struct wlr_xwayland_surface *xs = xsurface(d->view);
 	int w = d->width;
-	uint32_t bg = 0xffffffff, fg = d->active ? 0xff000000 : 0xff999999;
+	bool dark = dark_mode();
+	uint32_t bg = dark ? 0xff202020 : 0xffffffff;
+	uint32_t fg = dark ? (d->active ? 0xffffffff : 0xff8a8a8a) : (d->active ? 0xff000000 : 0xff999999);
+	uint32_t hover = dark ? 0xff3a3a3a : 0xffe5e5e5;
 #ifdef SG_MUTANT_WIDE_BUTTONS
 	uint32_t border = d->active ? 0xff707070 : 0xffaaaaaa;
 #else
-	uint32_t border = 0xffe3e3e3;
+	uint32_t border = dark ? 0xff404040 : 0xffe3e3e3;
 #endif
 
 	if (w < 1) {
@@ -393,7 +448,7 @@ render(struct cg_decor *d)
 	/* Maximize: a square; Restore: two */
 	int mx = w - BUTTON_W - BUTTON_W / 2;
 	if (d->hover == PART_MAX) {
-		fill(p, w, w - 2 * BUTTON_W, 0, w - BUTTON_W, DECOR_TITLE_H, 0xffe5e5e5);
+		fill(p, w, w - 2 * BUTTON_W, 0, w - BUTTON_W, DECOR_TITLE_H, hover);
 	}
 	if (!d->view->maximized) {
 		for (int i = -5; i <= 5; i++) {
@@ -419,7 +474,7 @@ render(struct cg_decor *d)
 	/* Minimize: a short line */
 	int nx = w - 2 * BUTTON_W - BUTTON_W / 2;
 	if (d->hover == PART_MIN) {
-		fill(p, w, w - 3 * BUTTON_W, 0, w - 2 * BUTTON_W, DECOR_TITLE_H, 0xffe5e5e5);
+		fill(p, w, w - 3 * BUTTON_W, 0, w - 2 * BUTTON_W, DECOR_TITLE_H, hover);
 	}
 	for (int i = -5; i <= 5; i++) {
 		put(p, w, nx + i, cy, fg);
@@ -427,7 +482,7 @@ render(struct cg_decor *d)
 
 	fetch_icon(d, xs);
 	if (d->has_icon) {
-		/* over the white bar: premultiplied over */
+		/* over the bar: premultiplied over */
 		int iy = (DECOR_TITLE_H - ICON_PX) / 2;
 		for (int y = 0; y < ICON_PX; y++) {
 			for (int x = 0; x < ICON_PX && ICON_X + x < w; x++) {

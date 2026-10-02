@@ -4,12 +4,16 @@
 # the window with its title, a border around both; Close asks the program
 # to close; dragging the bar moves the window; Maximize fills the screen
 # above the taskbar. Wine's windows are override-redirect and get none.
+# In dark mode (gtk-application-prefer-dark-theme, as sg-settingsctl
+# writes it) the bar is dark: Kate's went light, then dark once Wine framed
+# it (David 2026-10-02).
 set -u
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 COMP="${SG_COMPOSITOR_BIN:-$HERE/build/sg-compositor}"
 T=$(mktemp -d); RC=0; CP=
 cleanup() { [ -s "$T/client" ] && kill "$(cat "$T/client")" 2>/dev/null; [ -n "$CP" ] && kill -9 "$CP" 2>/dev/null; rm -rf "$T"; }
 trap cleanup EXIT INT TERM
+export XDG_CONFIG_HOME="$T/cfg-light"   # light, whatever this machine's own setting
 pass() { echo "PASS  $*"; }
 fail() { echo "FAIL  $*"; RC=1; }
 for t in grim convert xterm xev Xwayland wayland-scanner; do command -v "$t" >/dev/null || { echo "SKIP: $t missing"; exit 77; }; done
@@ -116,6 +120,19 @@ if cc -O2 -o "$T/wmreq-client" "$HERE/test/wmreq-client.c" -lX11 2>/dev/null; th
         || fail "no icon on the bar ($mag magenta pixels)"
     kill "$(cat "$T/client3" 2>/dev/null)" "$CP3" 2>/dev/null
 else echo "      (no libX11 headers: the icon not checked)"; fi
+
+# dark mode: the bar is dark (#202020)
+mkdir -p "$T/cfg-dark/gtk-3.0"; printf '[Settings]\ngtk-application-prefer-dark-theme=true\n' > "$T/cfg-dark/gtk-3.0/settings.ini"
+XDG_CONFIG_HOME="$T/cfg-dark" WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 WLR_RENDERER=pixman \
+    "$COMP" -L "$T/priv4.sock" -C "$T/ctl4.sock" -U "$(id -u)" -- \
+    sh -c "echo \$\$ > $T/client4; xterm -geometry 60x10 -bg '#ff0000' -fg '#ff0000' -e sleep 600 & echo up > $T/d4; exec sleep 600" >"$T/log4" 2>&1 &
+CP4=$!
+_w=0; while [ ! -s "$T/d4" ] && [ $_w -lt 50 ]; do sleep 0.2; _w=$((_w+1)); done
+sleep 4
+rm -f "$T/c.png"; WAYLAND_DISPLAY="$T/priv4.sock" grim "$T/c.png" >/dev/null 2>&1
+dk=$(convert "$T/c.png" -fill black +opaque '#202020' -fill white -opaque '#202020' -format "%[fx:int(mean*w*h+0.5)]" info: 2>/dev/null)
+[ "${dk:-0}" -ge 3000 ] && pass "in dark mode the title bar is dark ($dk pixels of #202020)" || fail "dark mode: ${dk:-no} dark bar pixels"
+kill "$(cat "$T/client4" 2>/dev/null)" "$CP4" 2>/dev/null
 
 [ $RC = 0 ] && echo "RESULT: PASS" || echo "RESULT: FAIL"
 exit $RC

@@ -1,3 +1,12 @@
+sg-compositor (0.2.0+sg26) unstable; urgency=medium
+
+  * A Linux program's title bar follows dark mode (the user's GTK setting,
+    which Settings and Start keep with the apps' mode): Kate's bar was
+    light in dark mode, then dark once Wine framed it (David 2026-10-02).
+    Test: test/decor-gate.sh (mutant DECOR_ALWAYS_LIGHT).
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Fri, 02 Oct 2026 21:05:00 +0000
+
 sg-compositor (0.2.0+sg25) unstable; urgency=medium
 
   * sg-deskcomp draws a window again once it leaves full screen: the
