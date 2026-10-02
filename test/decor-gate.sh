@@ -41,9 +41,9 @@ for x in $(seq "$XL" 2 "$W"); do [ "$(px "$x" "$CY")" != "255,255,255" ] && { XR
 for y in $(seq "$CY" -1 0); do [ "$(px $((XR - 100)) "$y")" != "255,255,255" ] && { BT=$((y + 1)); break; }; done
 echo "      window $XL..$XR, bar from $BT"
 border=$(px $((XR - 100)) $((BT - 1)))
-[ "$XL" -gt 0 ] && { [ "$border" = "112,112,112" ] || [ "$border" = "170,170,170" ]; } && [ "$(px $((XR - 100)) $((BT + 16)))" = "255,255,255" ] \
+[ "$XL" -gt 0 ] && [ "$border" = "227,227,227" ] && [ "$(px $((XR - 100)) $((BT + 16)))" = "255,255,255" ] \
     && [ $((CY - BT)) -gt 32 ] \
-    && pass "a title bar is above the window, with a border" || fail "no bar: border $(px $((XR - 100)) $((BT - 1))) bar $(px $((XR - 100)) $((BT + 16)))"
+    && pass "a title bar is above the window, with Wine's windows' edge (#e3e3e3)" || fail "no bar: border $(px $((XR - 100)) $((BT - 1))) bar $(px $((XR - 100)) $((BT + 16)))"
 ink=0
 for x in $(seq $((XL + 12)) $((XL + 90))); do
     for y in $(seq $((BT + 10)) 2 $((BT + 22))); do
@@ -52,8 +52,8 @@ for x in $(seq $((XL + 12)) $((XL + 90))); do
 done
 [ "$ink" -gt 10 ] && pass "its title is written on it" || fail "no title text on the bar ($ink)"
 
-# Close (the rightmost 46 pixels of the bar): xev is asked to close, and does
-ptr m $((XR - 23)) $((BT + 16)) d s 50 u
+# Close (the rightmost 30 pixels of the bar, as Wine's buttons): xev is asked to close, and does
+ptr m $((XR - 15)) $((BT + 16)) d s 50 u
 sleep 1
 shot
 [ "$(px $((XR - 100)) "$CY")" = "255,0,0" ] && pass "Close closes the window (WM_DELETE_WINDOW)" || fail "Close: the window is still there"
@@ -74,14 +74,14 @@ for x in $(seq 0 4 "$W"); do [ "$(px "$x" $((row + 40)))" = "255,0,0" ] && { L2=
 # Maximize: the second button from the right on its bar
 R=0
 for x in $(seq "$W" -2 0); do [ "$(px "$x" $((row + 40)))" = "255,0,0" ] && { R=$x; break; }; done
-ptr m $((R - 46 - 23)) $((TOP + 40 - 16)) d s 50 u
+ptr m $((R - 30 - 15)) $((TOP + 40 - 16)) d s 50 u
 shot
 [ "$(px 2 $((H / 2)))" = "255,0,0" ] && [ "$(px $((W - 3)) $((H / 2)))" = "255,0,0" ] && [ "$(px $((W / 2)) 16)" = "255,255,255" ] \
     && [ "$(px $((W / 2)) $((H - 20)))" != "255,0,0" ] \
     && pass "Maximize fills the width, its bar at the top, the taskbar's strip left free" || fail "maximize: $(px 2 $((H / 2))) $(px $((W / 2)) 16) $(px $((W / 2)) $((H - 20)))"
 # Minimize: the third button from the right -- the window and its bar go (its
 # taskbar button brings it back: XACTIVATE, test/xwindows-gate.sh)
-ptr m $((W - 2 * 46 - 23)) 16 d s 50 u
+ptr m $((W - 2 * 30 - 15)) 16 d s 50 u
 shot
 [ "$(px $((W / 2)) $((H / 2)))" != "255,0,0" ] && [ "$(px $((W / 2)) 16)" != "255,255,255" ] \
     && pass "Minimize hides the window and its bar" || fail "minimize: $(px $((W / 2)) $((H / 2))) bar $(px $((W / 2)) 16)"

@@ -37,7 +37,14 @@
 #include "xwayland.h"
 #include "session_x11.h"
 
+/* as every other window's caption buttons (Wine's, the theme's WindowMetrics:
+ * square, 30 px), and its #e3e3e3 edge (David 2026-10-01: SG Office's and the
+ * Linux programs' title bars looked different) */
+#ifdef SG_MUTANT_WIDE_BUTTONS
 #define BUTTON_W 46
+#else
+#define BUTTON_W 30
+#endif
 #define TASKBAR_H 40 /* the shell's taskbar, at the bottom: a maximized window stops above it */
 #define DOUBLE_CLICK_MS 400
 
@@ -273,7 +280,11 @@ render(struct cg_decor *d)
 	struct wlr_xwayland_surface *xs = xsurface(d->view);
 	int w = d->width;
 	uint32_t bg = 0xffffffff, fg = d->active ? 0xff000000 : 0xff999999;
+#ifdef SG_MUTANT_WIDE_BUTTONS
 	uint32_t border = d->active ? 0xff707070 : 0xffaaaaaa;
+#else
+	uint32_t border = 0xffe3e3e3;
+#endif
 
 	if (w < 1) {
 		return;
