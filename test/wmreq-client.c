@@ -5,7 +5,9 @@
  *   wmreq-client min   -- ask to be minimised (WM_CHANGE_STATE IconicState)
  *   wmreq-client activate SECONDS -- a green window that, after SECONDS,
  *                          asks to be brought forward (_NET_ACTIVE_WINDOW,
- *                          as SG Office does for a file opened again) */
+ *                          as SG Office does for a file opened again)
+ *   wmreq-client icon  -- a window with title bar (decorations wanted) and a
+ *                          16 px magenta _NET_WM_ICON (decor-gate.sh) */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -35,6 +37,17 @@ int main(int argc, char **argv)
 	if (!d || argc < 2) return 2;
 	w = XCreateSimpleWindow(d, DefaultRootWindow(d), 0, 0, 300, 200, 0, 0, 0x00ff00);
 	XStoreName(d, w, "wmreq");
+	if (!strcmp(argv[1], "icon")) {
+		unsigned long icon[2 + 16 * 16];
+		icon[0] = icon[1] = 16;
+		for (int i = 0; i < 16 * 16; i++) icon[2 + i] = 0xffff00ff;
+		XChangeProperty(d, w, XInternAtom(d, "_NET_WM_ICON", False), XA_CARDINAL, 32, PropModeReplace,
+				(unsigned char *) icon, 2 + 16 * 16);
+		XMapWindow(d, w);
+		XSync(d, False);
+		sleep(600);
+		return 0;
+	}
 	XChangeProperty(d, w, XInternAtom(d, "_MOTIF_WM_HINTS", False), XInternAtom(d, "_MOTIF_WM_HINTS", False), 32,
 			PropModeReplace, (unsigned char *) motif, 5);
 	XMapWindow(d, w);

@@ -101,5 +101,21 @@ rm -f "$T/c.png"; WAYLAND_DISPLAY="$T/priv2.sock" grim "$T/c.png" >/dev/null 2>&
 [ "$(px $((W / 2)) $((H / 2)))" != "0,255,0" ] && pass "at its own size (not stretched), with no title bar above" || fail "it fills the screen"
 kill "$(cat "$T/client2" 2>/dev/null)" "$CP2" 2>/dev/null
 
+# a program's icon (_NET_WM_ICON) at the left of its bar, as Wine's windows
+# show theirs: a 16 px magenta one, so 256 magenta pixels on the screen
+if cc -O2 -o "$T/wmreq-client" "$HERE/test/wmreq-client.c" -lX11 2>/dev/null; then
+    WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 WLR_RENDERER=pixman \
+        "$COMP" -L "$T/priv3.sock" -C "$T/ctl3.sock" -U "$(id -u)" -- \
+        sh -c "echo \$\$ > $T/client3; $T/wmreq-client icon & echo up > $T/d3; exec sleep 600" >"$T/log3" 2>&1 &
+    CP3=$!
+    _w=0; while [ ! -s "$T/d3" ] && [ $_w -lt 50 ]; do sleep 0.2; _w=$((_w+1)); done
+    sleep 4
+    rm -f "$T/c.png"; WAYLAND_DISPLAY="$T/priv3.sock" grim "$T/c.png" >/dev/null 2>&1
+    mag=$(convert "$T/c.png" -fill black +opaque '#ff00ff' -fill white -opaque '#ff00ff' -format "%[fx:int(mean*w*h+0.5)]" info: 2>/dev/null)
+    [ "${mag:-0}" -ge 200 ] && [ "${mag:-0}" -le 300 ] && pass "the program's icon is at the left of its title bar ($mag icon pixels)" \
+        || fail "no icon on the bar ($mag magenta pixels)"
+    kill "$(cat "$T/client3" 2>/dev/null)" "$CP3" 2>/dev/null
+else echo "      (no libX11 headers: the icon not checked)"; fi
+
 [ $RC = 0 ] && echo "RESULT: PASS" || echo "RESULT: FAIL"
 exit $RC

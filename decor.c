@@ -30,6 +30,7 @@
 #include <wlr/types/wlr_scene.h>
 #include <wlr/types/wlr_xcursor_manager.h>
 #include <wlr/xwayland.h>
+#include <xcb/xcb.h>
 
 #include "seat.h"
 #include "server.h"
@@ -46,6 +47,9 @@
 #define BUTTON_W 30
 #endif
 #define TASKBAR_H 40 /* the shell's taskbar, at the bottom: a maximized window stops above it */
+#define ICON_PX 16   /* the program's icon at the bar's left, as Wine's windows have theirs */
+#define ICON_X 7
+#define TITLE_X 26   /* where Wine's windows' titles start */
 #define DOUBLE_CLICK_MS 400
 
 enum part { PART_NONE, PART_BAR, PART_MIN, PART_MAX, PART_CLOSE };
@@ -61,6 +65,9 @@ struct cg_decor {
 	enum part hover;
 	struct wl_listener commit;
 	struct wl_listener set_title;
+	uint32_t icon[ICON_PX * ICON_PX]; /* the program's icon, ARGB, when has_icon */
+	bool has_icon;
+	int icon_tries;                   /* programs often set it after mapping */
 };
 
 static struct wl_list decors = {&decors, &decors};
@@ -254,6 +261,80 @@ draw_title(struct pixels *p, int w, int x, int room, const char *title, uint32_t
 	draw_text(p, w, x, baseline, "...", 3, color);
 }
 
+/* ---- the program's icon --------------------------------------------------- */
+
+/* _NET_WM_ICON: the size nearest above 16 px (else the largest), boxed down
+ * to 16 x 16; read once it is there (a few renders' worth of tries) */
+static void
+fetch_icon(struct cg_decor *d, struct wlr_xwayland_surface *xs)
+{
+	static xcb_atom_t net_wm_icon;
+	xcb_connection_t *c;
+	xcb_get_property_reply_t *r;
+	uint32_t *v, n, best = 0, bw = 0, bh = 0;
+
+#ifdef SG_MUTANT_NO_ICON
+	return;
+#endif
+	if (d->has_icon || d->icon_tries >= 8 || !d->view->server->xwayland) {
+		return;
+	}
+	d->icon_tries++;
+	if (!(c = wlr_xwayland_get_xwm_connection(d->view->server->xwayland))) {
+		return;
+	}
+	if (!net_wm_icon) {
+		xcb_intern_atom_reply_t *a = xcb_intern_atom_reply(c, xcb_intern_atom(c, 0, 12, "_NET_WM_ICON"), NULL);
+		if (!a) {
+			return;
+		}
+		net_wm_icon = a->atom;
+		free(a);
+	}
+	r = xcb_get_property_reply(c, xcb_get_property(c, 0, xs->window_id, net_wm_icon, XCB_ATOM_CARDINAL, 0, 1 << 20), NULL);
+	if (!r) {
+		return;
+	}
+	v = xcb_get_property_value(r);
+	n = xcb_get_property_value_length(r) / 4;
+	/* entries: width, height, then width * height ARGB pixels */
+	for (uint32_t i = 0; i + 2 <= n;) {
+		uint32_t w = v[i], h = v[i + 1];
+		if (!w || !h || w > 1024 || h > 1024 || i + 2 + (uint64_t) w * h > n) {
+			break;
+		}
+		if (!bw || (w >= ICON_PX && (bw < ICON_PX || w < bw)) || (bw < ICON_PX && w > bw)) {
+			best = i; bw = w; bh = h;
+		}
+		i += 2 + w * h;
+	}
+	if (bw) {
+		const uint32_t *px = v + best + 2;
+		for (int y = 0; y < ICON_PX; y++) {
+			for (int x = 0; x < ICON_PX; x++) {
+				/* the source pixels under this one, averaged (premultiplied) */
+				uint32_t x0 = x * bw / ICON_PX, x1 = (x + 1) * bw / ICON_PX, y0 = y * bh / ICON_PX,
+					 y1 = (y + 1) * bh / ICON_PX, cnt = 0, sa = 0, sr = 0, sg = 0, sb = 0;
+				if (x1 <= x0) x1 = x0 + 1;
+				if (y1 <= y0) y1 = y0 + 1;
+				for (uint32_t yy = y0; yy < y1 && yy < bh; yy++) {
+					for (uint32_t xx = x0; xx < x1 && xx < bw; xx++) {
+						uint32_t p = px[yy * bw + xx], a = p >> 24;
+						sa += a;
+						sr += ((p >> 16) & 0xff) * a / 255;
+						sg += ((p >> 8) & 0xff) * a / 255;
+						sb += (p & 0xff) * a / 255;
+						cnt++;
+					}
+				}
+				d->icon[y * ICON_PX + x] = cnt ? (sa / cnt) << 24 | (sr / cnt) << 16 | (sg / cnt) << 8 | (sb / cnt) : 0;
+			}
+		}
+		d->has_icon = true;
+	}
+	free(r);
+}
+
 /* ---- the bar ------------------------------------------------------------ */
 
 static struct wlr_xwayland_surface *
@@ -344,7 +425,22 @@ render(struct cg_decor *d)
 		put(p, w, nx + i, cy, fg);
 	}
 
-	draw_title(p, w, 12, w - 3 * BUTTON_W - 20, xs->title ? xs->title : "", fg);
+	fetch_icon(d, xs);
+	if (d->has_icon) {
+		/* over the white bar: premultiplied over */
+		int iy = (DECOR_TITLE_H - ICON_PX) / 2;
+		for (int y = 0; y < ICON_PX; y++) {
+			for (int x = 0; x < ICON_PX && ICON_X + x < w; x++) {
+				uint32_t s = d->icon[y * ICON_PX + x], a = s >> 24, b = p->data[(iy + y) * w + ICON_X + x];
+				uint32_t r = ((s >> 16) & 0xff) + ((b >> 16) & 0xff) * (255 - a) / 255;
+				uint32_t g = ((s >> 8) & 0xff) + ((b >> 8) & 0xff) * (255 - a) / 255;
+				uint32_t bl = (s & 0xff) + (b & 0xff) * (255 - a) / 255;
+				p->data[(iy + y) * w + ICON_X + x] = 0xff000000 | (r > 255 ? 255 : r) << 16 | (g > 255 ? 255 : g) << 8 | (bl > 255 ? 255 : bl);
+			}
+		}
+	}
+	draw_title(p, w, d->has_icon ? TITLE_X : 12, w - 3 * BUTTON_W - 20 - (d->has_icon ? TITLE_X - 12 : 0),
+		   xs->title ? xs->title : "", fg);
 
 	wlr_buffer_init(&p->base, &pixels_impl, w, DECOR_TITLE_H);
 	wlr_scene_buffer_set_buffer(d->bar, &p->base);

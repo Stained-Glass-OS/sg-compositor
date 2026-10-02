@@ -1,3 +1,11 @@
+sg-compositor (0.2.0+sg23) unstable; urgency=medium
+
+  * A Linux program's title bar shows its icon (_NET_WM_ICON) at the left,
+    as Wine's windows do, the title beside it. Test: test/decor-gate.sh
+    (mutant NO_ICON fails it).
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Fri, 02 Oct 2026 08:00:00 +0000
+
 sg-compositor (0.2.0+sg22) unstable; urgency=medium
 
   * A Linux program's title bar is like every other window's (David

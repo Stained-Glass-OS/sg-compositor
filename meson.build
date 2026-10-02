@@ -38,8 +38,9 @@ endif
 wlroots        = dependency('wlroots-0.18', fallback: ['wlroots', 'wlroots'])
 wayland_protos = dependency('wayland-protocols', version: '>=1.14')
 wayland_server = dependency('wayland-server')
-# sg-compositor: title bars' text (decor.c)
+# sg-compositor: title bars' text (decor.c), and their icons (_NET_WM_ICON)
 freetype       = dependency('freetype2')
+xcb            = dependency('xcb')
 xkbcommon      = dependency('xkbcommon')
 math           = cc.find_library('m')
 
@@ -167,6 +168,7 @@ executable(
     wlroots,
     xkbcommon,
     freetype,
+    xcb,
     math,
   ],
   install: true,
