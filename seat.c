@@ -39,6 +39,7 @@
 #include "elevated.h"
 #include "output.h"
 #include "seat.h"
+#include "session_x11.h"
 #include "server.h"
 #include "view.h"
 #if CAGE_HAS_XWAYLAND
@@ -446,6 +447,12 @@ handle_key_event(struct wlr_keyboard *keyboard, struct cg_seat *seat, void *data
 		}
 	}
 
+	if (!handled && event->state == WL_KEYBOARD_KEY_STATE_PRESSED &&
+	    (keysyms_have(syms, nsyms, XKB_KEY_Super_L) || keysyms_have(syms, nsyms, XKB_KEY_Super_R))) {
+		/* the Windows key is the shell's: from a Linux program's window,
+		 * the desktop takes the keyboard first (session_x11.c) */
+		session_x11_super(seat->server, seat_get_focus(seat));
+	}
 	if (!handled && event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
 		/* sg-compositor: the user typing into an elevated window is
 		 * what lets the session's clipboard text reach it. */

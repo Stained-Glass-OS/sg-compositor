@@ -12,5 +12,7 @@ bool session_x11_activate(struct cg_server *server, unsigned long window);
 bool session_x11_minimize(struct cg_server *server, unsigned long window);
 bool session_x11_close(struct cg_server *server, unsigned long window);
 bool session_x11_desktop_front(struct cg_server *server);
+struct cg_view;
+bool session_x11_super(struct cg_server *server, struct cg_view *focus);
 
 #endif

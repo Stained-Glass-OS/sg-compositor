@@ -6,6 +6,8 @@
 # the taskbar asks XDESKTOP: the desktop is in front, with focus, the Linux
 # window still shown (its button brings it back: XACTIVATE). A Linux program
 # bringing its own window forward (_NET_ACTIVE_WINDOW) gets it in front too.
+# The Windows key pressed in a Linux window is the shell's: the desktop comes
+# forward with the keyboard (session_x11_super).
 set -u
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 COMP="${SG_COMPOSITOR_BIN:-$HERE/build/sg-compositor}"
@@ -57,6 +59,14 @@ grep -q asked "$T/act.out" && shot asked
     || fail "after _NET_ACTIVE_WINDOW: $(px asked $CX $CY) $(ctl XWINDOWS | tr '\n' '|')"
 [ "$(ctl XDESKTOP)" = OK ] && [ "$(ctl "XACTIVATE $ID")" = OK ] && shot back
 [ "$(px back $CX $CY)" = "0,255,0" ] && pass "XACTIVATE brings it in front of the desktop again" || fail "after XACTIVATE: $(px back $CX $CY)"
+# the Windows key from the Linux window: the shell's (Start, Win+E...), so the
+# desktop takes the keyboard first (session_x11_super)
+if command -v wtype >/dev/null; then
+    WAYLAND_DISPLAY="$T/priv.sock" wtype -k Super_L; shot super
+    [ "$(px super $CX $CY)" = "0,0,255" ] && ctl XWINDOWS | grep -q "^$ID shown - " \
+        && pass "the Windows key from a Linux window brings the desktop in front with the keyboard (Start can open)" \
+        || fail "after the Windows key: $(px super $CX $CY) $(ctl XWINDOWS | tr '\n' '|')"
+else echo "      (no wtype: the Windows key not checked)"; fi
 kill "$AP" 2>/dev/null
 [ $RC = 0 ] && echo "RESULT: PASS" || echo "RESULT: FAIL"
 exit $RC

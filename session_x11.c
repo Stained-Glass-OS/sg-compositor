@@ -158,6 +158,27 @@ session_x11_desktop_front(struct cg_server *server)
 	return false;
 }
 
+/* The Windows key pressed while a Linux program's window has the keyboard:
+ * the shell's keys (Start, Win+E, Win+R, Win+Tab...) are the shell's, as on
+ * Windows -- they reached the Linux program and Start never opened (David
+ * 2026-10-02 QA). The desktop comes in front with the focus first, so the key
+ * reaches the shell. Not from an elevated window, the lock screen or a
+ * consent prompt, which keep the keyboard. */
+bool
+session_x11_super(struct cg_server *server, struct cg_view *focus)
+{
+#ifdef SG_MUTANT_SUPER_STAYS
+	return false;
+#endif
+	if (!focus || focus->elevated || lock_view_is_privileged(&server->lock, focus)) {
+		return false;
+	}
+	if (focus->type == CAGE_XWAYLAND_VIEW && xwayland_view_is_shell_desktop(focus)) {
+		return false;
+	}
+	return session_x11_desktop_front(server);
+}
+
 bool
 session_x11_minimize(struct cg_server *server, unsigned long window)
 {
@@ -201,6 +222,7 @@ session_x11_list(struct cg_server *server, char *buf, size_t len)
 	return (size_t) snprintf(buf, len, "END\n");
 }
 bool session_x11_activate(struct cg_server *server, unsigned long window) { (void) server; (void) window; return false; }
+bool session_x11_super(struct cg_server *server, struct cg_view *focus) { (void) server; (void) focus; return false; }
 bool session_x11_minimize(struct cg_server *server, unsigned long window) { (void) server; (void) window; return false; }
 bool session_x11_close(struct cg_server *server, unsigned long window) { (void) server; (void) window; return false; }
 bool session_x11_desktop_front(struct cg_server *server) { (void) server; return false; }
