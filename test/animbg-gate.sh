@@ -26,7 +26,7 @@ unset DISPLAY WAYLAND_DISPLAY XAUTHORITY
 
 if [ "${1:-}" = --mutants ]; then
     rc=0
-    for m in STATIC_BACKGROUND NO_BATTERY_SAVER CELLS_EVERY_FRAME PICTURE_COLOURS; do
+    for m in STATIC_BACKGROUND NO_BATTERY_SAVER CELLS_EVERY_FRAME PICTURE_COLOURS LIGHT_WHITE; do
         out=$(mktemp /var/tmp/sg-animbg-mutant.XXXXXX)
         cc -std=c11 -O2 -DSG_MUTANT_$m -o "$out" "$HERE/sg-deskcomp.c" -lX11 -lXcomposite -lXdamage -lXfixes -lXrender -lXext -lm \
             || { echo "SKIP: cannot build the mutant"; exit 77; }
@@ -128,6 +128,20 @@ diff=$(convert "$T/l0.png" "$T/l1.png" -compose difference -composite -colorspac
 lum() { convert "$T/$1.png" -crop 1x1+$2+$3 +repage -colorspace gray -format '%[fx:int(255*mean)]' info:; }
 near=$(lum l1 880 620); far=$(lum l1 880 120)
 [ "$((near - far))" -gt 25 ] && pass "brighter where the pointer is ($near there, $far away from it)" || fail "light at the pointer: $near, away $far"
+# ...as light through glass, not a white disk on it (David 2026-10-03): the
+# green pane glows greener there -- red and blue stay well under green --
+# and the glass away from the light is dimmer than the picture itself
+rgb_near=$(px l1 880 620); gn=$(echo "$rgb_near" | cut -d, -f2); rn=$(echo "$rgb_near" | cut -d, -f1); bn=$(echo "$rgb_near" | cut -d, -f3)
+rgb_far=$(px l1 880 120); gf=$(echo "$rgb_far" | cut -d, -f2)
+[ "${gn:-0}" -gt "${gf:-0}" ] && [ $((rn * 100)) -lt $((gn * 70)) ] && [ $((bn * 100)) -lt $((gn * 70)) ] && [ "${gf:-255}" -lt 140 ] \
+    && pass "light through glass: the green glows green there ($rgb_near), dim away from it ($rgb_far)" \
+    || fail "not glass-like: at the light $rgb_near, away $rgb_far (the picture's green is 48,160,80)"
+# where the light was is drawn again, all of it: no stale glow left in a box
+# behind it (the spill reaches twice its radius) -- the yellow band, left of
+# where the light ended, is one colour along a row
+row=$(convert "$T/l1.png" -crop 300x1+60+430 +repage -format '%[fx:int(255*standard_deviation)]' info:)
+[ "${row:-99}" -le 3 ] && pass "nothing left behind where the light passed (row deviation $row)" \
+    || fail "light left behind: the yellow band's row varies ($row)"
 ic=$(convert "$T/l0.png" "$T/l1.png" -crop 64x48+12+12 +repage -compose difference -composite -format '%[fx:int(255*maxima)]' info: 2>/dev/null | head -1)
 ink=$(convert "$T/l0.png" -crop 64x48+12+12 +repage -colorspace gray -format '%[fx:int(255*standard_deviation)]' info:)
 [ "${ink:-0}" -gt 20 ] && [ "${ic:-255}" -le 2 ] && pass "the icon is drawn crisp over it, unchanged (difference $ic)" \

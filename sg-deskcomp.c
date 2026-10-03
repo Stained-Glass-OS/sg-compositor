@@ -899,6 +899,67 @@ static int anim_battery;          /* 0 mains, 1 on battery, 2 battery saver (pau
 static double battery_checked;
 static XRectangle light_box;      /* where the light was drawn last */
 static int light_x, light_y, light_r;
+static Picture glow_pict, glow_src;   /* the picture blurred: light's colour spilling */
+static Pixmap glow_pixmap;
+
+static void free_glow(void)
+{
+	if (glow_pict) XRenderFreePicture(dpy, glow_pict);
+	if (glow_pixmap) XFreePixmap(dpy, glow_pixmap);
+	glow_pict = glow_src = 0;
+	glow_pixmap = 0;
+}
+
+static void set_scale(Picture p, double by, const char *filter)
+{
+	XTransform t = { { { XDoubleToFixed(by), 0, 0 }, { 0, XDoubleToFixed(by), 0 }, { 0, 0, XDoubleToFixed(1) } } };
+	XRenderSetPictureTransform(dpy, p, &t);
+	XRenderSetPictureFilter(dpy, p, filter, NULL, 0);
+}
+
+/* the picture at a sixteenth of its size, in two steps of a quarter, drawn
+ * back at full size smoothly: a soft blur of its colours, made once per picture */
+static Picture glow_of(Picture base)
+{
+	int w1 = (dw + 3) / 4, h1 = (dh + 3) / 4, w2 = (w1 + 3) / 4, h2 = (h1 + 3) / 4;
+	Pixmap p1;
+	Picture q1;
+	XRenderPictureAttributes pad = { .repeat = RepeatPad };
+	if (glow_pict && glow_src == base) return glow_pict;
+	free_glow();
+	p1 = XCreatePixmap(dpy, desktop, w1, h1, format->depth);
+	glow_pixmap = XCreatePixmap(dpy, desktop, w2, h2, format->depth);
+	q1 = XRenderCreatePicture(dpy, p1, format, CPRepeat, &pad);
+	glow_pict = XRenderCreatePicture(dpy, glow_pixmap, format, CPRepeat, &pad);
+	set_scale(base, 4, "bilinear");
+	XRenderComposite(dpy, PictOpSrc, base, None, q1, 0, 0, 0, 0, 0, 0, w1, h1);
+	set_scale(base, 1, "fast");
+	set_scale(q1, 4, "bilinear");
+	XRenderComposite(dpy, PictOpSrc, q1, None, glow_pict, 0, 0, 0, 0, 0, 0, w2, h2);
+	XRenderFreePicture(dpy, q1);
+	XFreePixmap(dpy, p1);
+	set_scale(glow_pict, 1.0 / 16, "bilinear");
+	glow_src = base;
+	return glow_pict;
+}
+
+static Picture radial(int x, int y, int r, int n, const double *at, const unsigned short *alpha, int pad)
+{
+	XRadialGradient g = { { XDoubleToFixed(x), XDoubleToFixed(y), 0 }, { XDoubleToFixed(x), XDoubleToFixed(y), XDoubleToFixed(r) } };
+	XFixed stops[4];
+	XRenderColor cols[4];
+	Picture p;
+	for (int i = 0; i < n; i++) {
+		stops[i] = XDoubleToFixed(at[i]);
+		cols[i] = (XRenderColor){ 0, 0, 0, alpha[i] };
+	}
+	p = XRenderCreateRadialGradient(dpy, &g, stops, cols, n);
+	if (pad) {
+		XRenderPictureAttributes pa = { .repeat = RepeatPad };
+		XRenderChangePicture(dpy, p, CPRepeat, &pa);
+	}
+	return p;
+}
 
 static Picture make_mask(int w, int h, unsigned char *data)
 {
@@ -922,6 +983,7 @@ static void load_wallpaper(void)
 	if (wp_pict) XRenderFreePicture(dpy, wp_pict);
 	if (icon_mask) XRenderFreePicture(dpy, icon_mask);
 	wp_pict = icon_mask = 0;
+	free_glow();
 	if (!wp || !dp || opt_background == BG_STATIC) return;
 	trapped = 0;
 	a = XGetImage(dpy, wp, 0, 0, dw, dh, AllPlanes, ZPixmap);
@@ -1370,7 +1432,8 @@ static void animate(double t)
 		static double still_since;
 		if (!pointer_at(&x, &y)) { anim_next = t + 0.5; return; }
 		if (x != light_x || y != light_y || r != light_r) {
-			XRectangle box = { x - r, y - r, 2 * r, 2 * r };
+			/* all the light touches: its colours spill to twice its radius */
+			XRectangle box = { x - 2 * r, y - 2 * r, 4 * r, 4 * r };
 			if (light_box.width) damage_uncovered(&light_box);
 			damage_uncovered(&box);
 			light_box = box;
@@ -1411,25 +1474,41 @@ static void draw_background(void)
 	return;
 #endif
 	if (opt_background == BG_LIGHT) {
-		/* the picture as it is, a shade quieter; where the pointer is, light
-		 * shines through it: its own colours added again through the
-		 * light's soft round falloff, and a little warm white */
-		XRenderColor veil = { 0, 0, 0, 0x1400 };
+		/* light shining through stained glass (David 2026-10-03: the first
+		 * try "just looks like a white circle being drawn on top"): the
+		 * room is dim and the glass with it; where the light is behind it
+		 * the glass glows in its own colours -- the picture added to itself,
+		 * so a red pane gets redder and the dark lead between panes stays
+		 * dark, never white -- and its colours spill softly about (the
+		 * picture blurred, added faintly over a wider round). */
+		XRenderColor dark = { 0, 0, 0, 0x9000 };
+		Picture shade = XRenderCreateSolidFill(dpy, &dark);
 		XRenderComposite(dpy, PictOpSrc, base, None, buffer_pict, 0, 0, 0, 0, 0, 0, dw, dh);
-		XRenderFillRectangle(dpy, PictOpOver, buffer_pict, &veil, 0, 0, dw, dh);
 		if (light_r > 0) {
-			XRadialGradient g = { { XDoubleToFixed(light_x), XDoubleToFixed(light_y), 0 },
-			                      { XDoubleToFixed(light_x), XDoubleToFixed(light_y), XDoubleToFixed(light_r) } };
-			XFixed stops[3] = { XDoubleToFixed(0), XDoubleToFixed(0.35), XDoubleToFixed(1) };
-			XRenderColor cols[3] = { { 0, 0, 0, 0xe000 }, { 0, 0, 0, 0x7000 }, { 0, 0, 0, 0 } };
-			XRenderColor warm = { 0x3000, 0x2a00, 0x1c00, 0xffff };
-			Picture light = XRenderCreateRadialGradient(dpy, &g, stops, cols, 3);
-			Picture glow = XRenderCreateSolidFill(dpy, &warm);
-			XRenderComposite(dpy, PictOpAdd, base, light, buffer_pict, 0, 0, 0, 0, 0, 0, dw, dh);
-			XRenderComposite(dpy, PictOpAdd, glow, light, buffer_pict, 0, 0, 0, 0, 0, 0, dw, dh);
-			XRenderFreePicture(dpy, glow);
-			XRenderFreePicture(dpy, light);
-		}
+			static const double veil_at[] = { 0, 0.55, 1 }, lit_at[] = { 0, 0.45, 1 }, glow_at[] = { 0, 0.5, 1 };
+			static const unsigned short veil_a[] = { 0, 0x5800, 0xffff };
+			static const unsigned short lit_a[] = { 0x9000, 0x5800, 0 }, glow_a[] = { 0x6000, 0x2800, 0 };
+			Picture veil = radial(light_x, light_y, light_r, 3, veil_at, veil_a, 1);
+			Picture lit = radial(light_x, light_y, light_r, 3, lit_at, lit_a, 0);
+			Picture spill = radial(light_x, light_y, light_r * 2, 3, glow_at, glow_a, 0);
+			XRenderComposite(dpy, PictOpOver, shade, veil, buffer_pict, 0, 0, 0, 0, 0, 0, dw, dh);
+			XRenderComposite(dpy, PictOpAdd, base, lit, buffer_pict, 0, 0, 0, 0, 0, 0, dw, dh);
+#ifndef SG_MUTANT_LIGHT_WHITE
+			XRenderComposite(dpy, PictOpAdd, glow_of(base), spill, buffer_pict, 0, 0, 0, 0, 0, 0, dw, dh);
+#else
+			{
+				XRenderColor white = { 0xffff, 0xffff, 0xffff, 0xffff };
+				Picture w = XRenderCreateSolidFill(dpy, &white);
+				XRenderComposite(dpy, PictOpAdd, w, lit, buffer_pict, 0, 0, 0, 0, 0, 0, dw, dh);
+				XRenderFreePicture(dpy, w);
+			}
+#endif
+			XRenderFreePicture(dpy, spill);
+			XRenderFreePicture(dpy, lit);
+			XRenderFreePicture(dpy, veil);
+		} else
+			XRenderComposite(dpy, PictOpOver, shade, None, buffer_pict, 0, 0, 0, 0, 0, 0, dw, dh);
+		XRenderFreePicture(dpy, shade);
 	} else if (opt_background == BG_CELLS && cells_pict) {
 		XRenderComposite(dpy, PictOpSrc, cells_pict, None, buffer_pict, 0, 0, 0, 0, 0, 0, dw, dh);
 	} else
@@ -1554,6 +1633,7 @@ static void load_background(void)
 	Pixmap pm = prop_card(desktop, atom_bgpixmap, XA_PIXMAP, 0);
 	if (bg_pict) XRenderFreePicture(dpy, bg_pict);
 	bg_pict = 0;
+	free_glow();
 	if (!pm) return;
 	trapped = 0;
 	bg_pict = XRenderCreatePicture(dpy, pm, format, 0, NULL);
@@ -1614,6 +1694,7 @@ static int attach(Window d)
 static void detach(void)
 {
 	while (nwins) { wins[0].damage = 0; forget(&wins[0]); }
+	free_glow();
 	if (bg_pict) XRenderFreePicture(dpy, bg_pict);
 	if (buffer_pict) XRenderFreePicture(dpy, buffer_pict);
 	if (canvas_pict) XRenderFreePicture(dpy, canvas_pict);
