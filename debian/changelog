@@ -1,3 +1,12 @@
+sg-compositor (0.2.0+sg30) unstable; urgency=medium
+
+  * sg-deskcomp, Living glass in the logo's colours (David 2026-10-03):
+    each cell the logo's gold, magenta, purple or teal nearest in hue to the
+    picture there, lighter or darker as the picture is. Gate:
+    test/animbg-gate.sh (mutant SG_MUTANT_PICTURE_COLOURS).
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Sat, 03 Oct 2026 04:50:00 +0000
+
 sg-compositor (0.2.0+sg29) unstable; urgency=medium
 
   * sg-deskcomp, the moving backgrounds reworked (David 2026-10-03):

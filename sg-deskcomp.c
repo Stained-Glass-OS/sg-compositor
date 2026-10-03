@@ -878,7 +878,7 @@ static int draw_window(struct win *w, double t)
  *   light  light shines through the picture where the pointer is: its own
  *          colours brighter there, the rest a shade quieter (David
  *          2026-10-03: "the light is near the mouse");
- *   cells  the picture as stained glass: cells of its colours with lead
+ *   cells  the picture as stained glass: cells in the logo's colours with lead
  *          between them; each open window outlined by a lead line straight
  *          along its edges and a border of smaller cells, which go with it
  *          as it moves (below, "the cells").
@@ -1098,6 +1098,44 @@ static uint32_t thumb_color(float x, float y)
 	return c;
 }
 
+/* the cells' glass in the logo's colours (David 2026-10-03: "should match
+ * our theme colors in our logo"): the one nearest in hue to the picture
+ * there, a little lighter or darker as the picture is */
+static const uint32_t logo_glass[] = { 0xE8A200, 0xC42E8E, 0x7B2FBE, 0x12B5B0 };
+
+static float hue_of(uint32_t c, float *light)
+{
+	float r = ((c >> 16) & 0xff) / 255.0f, g = ((c >> 8) & 0xff) / 255.0f, b = (c & 0xff) / 255.0f;
+	float mx = r > g ? (r > b ? r : b) : (g > b ? g : b), mn = r < g ? (r < b ? r : b) : (g < b ? g : b), d = mx - mn, h;
+	*light = (mx + mn) / 2;
+	if (d < 1e-4f) return -1;   /* grey: no hue */
+	if (mx == r) h = (g - b) / d;
+	else if (mx == g) h = 2 + (b - r) / d;
+	else h = 4 + (r - g) / d;
+	h *= 60;
+	return h < 0 ? h + 360 : h;
+}
+
+static uint32_t logo_color(uint32_t pic, uint32_t salt)
+{
+	float light, l2, h = hue_of(pic, &light), best = 1e9f, k;
+	uint32_t c = logo_glass[salt % 4];
+	int rr, gg, bb;
+	if (h >= 0)
+		for (unsigned i = 0; i < sizeof(logo_glass) / sizeof(logo_glass[0]); i++) {
+			float d = fabsf(hue_of(logo_glass[i], &l2) - h);
+			if (d > 180) d = 360 - d;
+			if (d < best) { best = d; c = logo_glass[i]; }
+		}
+	/* the picture's lightness, and a little of each cell's own */
+	k = 0.80f + 0.45f * light + ((int)(salt >> 8) % 11 - 5) * 0.015f;
+	rr = (int)(((c >> 16) & 0xff) * k); gg = (int)(((c >> 8) & 0xff) * k); bb = (int)((c & 0xff) * k);
+	if (rr > 255) rr = 255;
+	if (gg > 255) gg = 255;
+	if (bb > 255) bb = 255;
+	return (uint32_t)rr << 16 | (uint32_t)gg << 8 | (uint32_t)bb;
+}
+
 /* the windows the cells keep out of, and whether they changed */
 static int find_panes(void)
 {
@@ -1166,7 +1204,15 @@ static void place_sites(void)
 		}
 	}
 	nsites = n;
-	for (int i = 0; i < nsites; i++) sites[i].color = thumb_color(sites[i].x, sites[i].y);
+	for (int i = 0; i < nsites; i++) {
+		uint32_t salt = hash32((uint32_t)(int)sites[i].x * 73856093u ^ (uint32_t)(int)sites[i].y * 19349663u);
+#ifndef SG_MUTANT_PICTURE_COLOURS
+		sites[i].color = logo_color(thumb_color(sites[i].x, sites[i].y), salt);
+#else
+		sites[i].color = thumb_color(sites[i].x, sites[i].y);
+		(void) salt;
+#endif
+	}
 }
 
 /* a site's square of the grid the search goes by */

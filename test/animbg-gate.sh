@@ -26,7 +26,7 @@ unset DISPLAY WAYLAND_DISPLAY XAUTHORITY
 
 if [ "${1:-}" = --mutants ]; then
     rc=0
-    for m in STATIC_BACKGROUND NO_BATTERY_SAVER CELLS_EVERY_FRAME; do
+    for m in STATIC_BACKGROUND NO_BATTERY_SAVER CELLS_EVERY_FRAME PICTURE_COLOURS; do
         out=$(mktemp /var/tmp/sg-animbg-mutant.XXXXXX)
         cc -std=c11 -O2 -DSG_MUTANT_$m -o "$out" "$HERE/sg-deskcomp.c" -lX11 -lXcomposite -lXdamage -lXfixes -lXrender -lXext -lm \
             || { echo "SKIP: cannot build the mutant"; exit 77; }
@@ -143,6 +143,19 @@ grep -q 'battery=2' "$T/dump.b1" && [ -n "$a" ] && [ "$a" = "$b" ] && pass "batt
 grep -q 'background=cells' "$T/dump.c0" && pass "cells: $(sed -n 's/.*sites=\([0-9]*\).*/\1/p' "$T/dump.c0") of them" || fail "cells: $(sed -n 3p "$T/dump.c0")"
 dark=$(convert "$T/c0.png" -crop 600x300+400+380 +repage -colorspace gray -threshold 22% -negate -format '%[fx:int(mean*w*h)]' info:)
 [ "${dark:-0}" -gt 1500 ] && pass "the picture as cells with lead lines ($dark dark pixels)" || fail "no lead lines: $dark"
+# the glass in the logo's colours (David 2026-10-03): over the red stripe
+# magenta, the blue purple, the green teal, the yellow gold
+logo_hue() {   # R,G,B -> magenta|purple|teal|gold|other
+    echo "$1" | awk -F, '{ r=$1; g=$2; b=$3
+        if (r > 1.8 * g && b > 1.8 * g && r > b) print "magenta"; else if (b > r && r > 1.8 * g) print "purple";
+        else if (g > 4 * r && b > 4 * r) print "teal"; else if (r > g && g > 6 * b) print "gold"; else print "other" }'; }
+cols=""; okc=0
+for spot in "120,120,magenta" "560,60,purple" "900,120,teal" "100,450,gold"; do
+    x=${spot%%,*}; rest=${spot#*,}; y=${rest%%,*}; want=${rest#*,}
+    got=$(logo_hue "$(convert "$T/c0.png" -crop 9x9+$((x - 4))+$((y - 4)) +repage -scale 1x1 -format '%[fx:int(255*r)],%[fx:int(255*g)],%[fx:int(255*b)]' info:)")
+    cols="$cols $want:$got"; [ "$got" = "$want" ] && okc=$((okc + 1))
+done
+[ "$okc" -ge 3 ] && pass "the glass in the logo's colours:$cols" || fail "not the logo's colours:$cols"
 # the lead straight along a window's top edge: the row just above it dark from end to end
 row() { convert "$T/$1.png" -crop "$2x1+$3+$4" +repage -colorspace gray -threshold 25% -format '%[fx:int(100*(1-mean))]' info:; }
 top=$(row c1 360 320 196)
