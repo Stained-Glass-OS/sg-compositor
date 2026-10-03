@@ -886,7 +886,7 @@ static int draw_window(struct win *w, double t)
  * (wine-sg 0804, _SG_WALLPAPER_PIXMAP), and they are the pixels where the
  * desktop's picture is not the wallpaper.
  * Cheap: the light at 8 frames a second, only where it is and not under
- * windows; the cells drawn at half size, 2 frames a second while they drift
+ * windows; the cells drawn at half size, a frame a second while they drift
  * (12 while they move to the windows); nothing while a full-screen program
  * is on top (X draws it) or on battery below 20 % ("battery saver"), and half
  * as often on battery. */
@@ -1064,15 +1064,23 @@ static void make_thumb(void)
 	XFreePixmap(dpy, pm);
 }
 
+/* the brightest about it: a site on the picture's own lead lines takes the
+ * glass beside them, not the lead (black cells) */
 static uint32_t thumb_color(float x, float y)
 {
-	int tx = (int)(x / 16), ty = (int)(y / 16);
-	if (!thumb || thumb->bits_per_pixel != 32) return 0x406080;
-	if (tx < 0) tx = 0;
-	if (ty < 0) ty = 0;
-	if (tx >= thumb_w) tx = thumb_w - 1;
-	if (ty >= thumb_h) ty = thumb_h - 1;
-	return *(uint32_t *)(thumb->data + (size_t)ty * thumb->bytes_per_line + tx * 4) & 0xffffff;
+	int cx = (int)(x / 16), cy = (int)(y / 16), best = -1;
+	uint32_t c = 0x406080;
+	if (!thumb || thumb->bits_per_pixel != 32) return c;
+	for (int ty = cy - 1; ty <= cy + 1; ty++)
+		for (int tx = cx - 1; tx <= cx + 1; tx++) {
+			uint32_t v;
+			int lum;
+			if (tx < 0 || ty < 0 || tx >= thumb_w || ty >= thumb_h) continue;
+			v = *(uint32_t *)(thumb->data + (size_t)ty * thumb->bytes_per_line + tx * 4) & 0xffffff;
+			lum = 2 * ((v >> 16) & 0xff) + 5 * ((v >> 8) & 0xff) + (v & 0xff);
+			if (lum > best) { best = lum; c = v; }
+		}
+	return c;
 }
 
 /* the cells' sites: a jittered grid, and rings round the windows */
@@ -1259,7 +1267,7 @@ static void animate(double t)
 		place_sites(1);
 		render_cells(t);
 		damage_uncovered(&all);
-		anim_next = t + (cells_move_until > t ? 1.0 / 12 : anim_battery ? 1.0 : 0.5);
+		anim_next = t + (cells_move_until > t ? 1.0 / 12 : anim_battery ? 2.0 : 1.0);
 	}
 	anim_frames++;
 }
