@@ -491,6 +491,18 @@ handle_control_connection(int fd, uint32_t mask, void *data)
 			session_x11_list(lock->server, list, sizeof(list));
 			reply = list;
 		}
+	} else if (!strncmp(buf, "XKILL ", 6)) {
+		/* End task on a program that did not close: the asking user's own
+		 * program's process, killed */
+		unsigned long window = 0;
+		if (!uid_may_lock(lock, uid)) {
+			AUDIT("refused XKILL from uid %d", (int) uid);
+			reply = "ERR not permitted\n";
+		} else if (sscanf(buf + 6, "%lu", &window) == 1 && session_x11_kill(lock->server, window, uid)) {
+			reply = "OK\n";
+		} else {
+			reply = "ERR no such window\n";
+		}
 	} else if (!strncmp(buf, "XACTIVATE ", 10) || !strncmp(buf, "XMINIMIZE ", 10) || !strncmp(buf, "XCLOSE ", 7)) {
 		unsigned long window = 0;
 		bool ok = false;

@@ -3,7 +3,9 @@
 # A Linux program's window (a terminal) is a top-level beside Wine's desktop
 # window, which the taskbar never saw. XWINDOWS lists it -- not a window of
 # a Wine program's class (*.exe) -- and XMINIMIZE, XACTIVATE and XCLOSE act
-# on it by its X window id.
+# on it by its X window id. XKILL (Task Manager's End task on a program that
+# did not close) kills a hung one's process (David 2026-10-02: CPU-X hung and
+# could not be ended); mutant SG_MUTANT_XKILL_DEAF fails it.
 set -u
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 COMP="${SG_COMPOSITOR_BIN:-$HERE/build/sg-compositor}"
@@ -17,7 +19,7 @@ for t in grim convert xterm Xwayland python3; do command -v "$t" >/dev/null || {
 
 WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 WLR_RENDERER=pixman \
     "$COMP" -L "$T/priv.sock" -C "$T/ctl.sock" -U "$(id -u)" -- \
-    sh -c "echo \$\$ > $T/client; xterm -class FakeWine.exe -T 'A Wine window' -geometry 20x5 -e sleep 600 & sleep 1; xterm -T 'Linux Terminal' -geometry 80x24 -bg '#ff0000' -fg '#ff0000' -e sleep 600 & echo up > $T/d; exec sleep 600" \
+    sh -c "echo \$\$ > $T/client; xterm -class FakeWine.exe -T 'A Wine window' -geometry 20x5 -e sleep 600 & sleep 1; xterm -T 'Hung Program' -geometry 20x5 -e sleep 600 & echo \$! > $T/hung; sleep 1; xterm -T 'Linux Terminal' -geometry 80x24 -bg '#ff0000' -fg '#ff0000' -e sleep 600 & echo up > $T/d; exec sleep 600" \
     >"$T/log" 2>&1 &
 CP=$!
 _w=0; while [ ! -s "$T/d" ] && [ $_w -lt 50 ]; do sleep 0.2; _w=$((_w+1)); done
@@ -62,6 +64,19 @@ if [ -x "$LC" ]; then
 fi
 [ "$(ctl "XCLOSE $ID")" = OK ] && sleep 2 || fail "XCLOSE refused"
 ctl XWINDOWS | grep -q "Linux Terminal" && fail "XCLOSE left the window" || pass "XCLOSE closes it (WM_DELETE_WINDOW)"
+# a hung program (stopped): asked to close, it stays; XKILL ends it
+HUNG=$(cat "$T/hung" 2>/dev/null)
+HID=$(ctl XWINDOWS | awk -F'\t' '$2 == "Hung Program" { split($1, f, " "); print f[1] }')
+kill -STOP "$HUNG" 2>/dev/null
+ctl "XCLOSE $HID" >/dev/null; sleep 2
+ctl XWINDOWS | grep -q "Hung Program" && [ -d "/proc/$HUNG" ] \
+    && pass "a hung program asked to close stays (it does not answer)" || fail "the hung program closed by itself: test broken"
+[ "$(ctl "XKILL $HID")" = OK ] && sleep 2 || fail "XKILL refused"
+# ended: gone, or a zombie its parent (exec'd into sleep) never reaps
+alive() { [ -d "/proc/$1" ] && ! grep -q '^[0-9]* (.*) Z' "/proc/$1/stat" 2>/dev/null; }
+alive "$HUNG" && fail "XKILL left the hung program running" || pass "XKILL ends the hung program's process"
+ctl XWINDOWS | grep -q "Hung Program" && fail "its window stayed" || pass "and its window is gone"
+[ "$(ctl "XKILL 99999999")" = "ERR no such window" ] && pass "XKILL of an unknown window: ERR" || fail "unknown window killed"
 
 [ $RC = 0 ] && echo "RESULT: PASS" || echo "RESULT: FAIL"
 exit $RC

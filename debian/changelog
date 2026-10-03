@@ -1,3 +1,14 @@
+sg-compositor (0.2.0+sg28) unstable; urgency=medium
+
+  * XKILL <window> on the control socket: Task Manager's End task on a Linux
+    program that did not close when asked (a hung one: CPU-X could not be
+    ended, David 2026-10-02) kills its process -- the one its window names,
+    when it is the asking user's own. sg-lockctl carries it (sg-session).
+    Gate: test/xwindows-gate.sh (a stopped program; mutant
+    SG_MUTANT_XKILL_DEAF).
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Sat, 03 Oct 2026 02:45:00 +0000
+
 sg-compositor (0.2.0+sg27) unstable; urgency=medium
 
   * The Glass look's window frames are glass, as the Glass taskbar is

@@ -6,7 +6,7 @@
  * button (QA: the Linux terminal "does not show up" on the taskbar).
  *
  * The control socket's XWINDOWS lists them (window id, shown or minimized,
- * focused or not, class, title), and XACTIVATE, XMINIMIZE and XCLOSE act on
+ * focused or not, class, title), and XACTIVATE, XMINIMIZE, XCLOSE and XKILL act on
  * one by its X window id; sg-lockctl carries them for the taskbar. Anyone in
  * the session may ask, as for ACTIVATE: it is focus, not input.
  *
@@ -16,11 +16,14 @@
 
 #include "session_x11.h"
 
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/stat.h>
 #include <time.h>
+#include <unistd.h>
 #include <wlr/types/wlr_scene.h>
 #include <wlr/xwayland.h>
 #include <xcb/xcb.h>
@@ -324,6 +327,32 @@ session_x11_minimize(struct cg_server *server, unsigned long window)
 	return true;
 }
 
+/* End task on a program that did not close when asked (a hung one: CPU-X,
+ * David 2026-10-02): its process killed -- the one its window names
+ * (_NET_WM_PID), when it is the asking user's own */
+bool
+session_x11_kill(struct cg_server *server, unsigned long window, uid_t uid)
+{
+	struct cg_view *view = find(server, window);
+	struct wlr_xwayland_surface *xs;
+	char proc[32];
+	struct stat st;
+
+	if (!view) {
+		return false;
+	}
+	xs = xwayland_view_from_view(view)->xwayland_surface;
+	snprintf(proc, sizeof(proc), "/proc/%d", (int) xs->pid);
+	if (xs->pid <= 1 || xs->pid == getpid() || stat(proc, &st) || st.st_uid != uid) {
+		return false;
+	}
+#ifndef SG_MUTANT_XKILL_DEAF
+	return kill(xs->pid, SIGKILL) == 0;
+#else
+	return true;
+#endif
+}
+
 bool
 session_x11_close(struct cg_server *server, unsigned long window)
 {
@@ -346,6 +375,7 @@ bool session_x11_activate(struct cg_server *server, unsigned long window) { (voi
 bool session_x11_super(struct cg_server *server, struct cg_view *focus) { (void) server; (void) focus; return false; }
 bool session_x11_minimize(struct cg_server *server, unsigned long window) { (void) server; (void) window; return false; }
 bool session_x11_close(struct cg_server *server, unsigned long window) { (void) server; (void) window; return false; }
+bool session_x11_kill(struct cg_server *server, unsigned long window, uid_t uid) { (void) server; (void) window; (void) uid; return false; }
 bool session_x11_desktop_front(struct cg_server *server) { (void) server; return false; }
 void session_x11_hold(struct cg_view *view) { (void) view; }
 void session_x11_unhold(struct cg_view *view) { (void) view; }
