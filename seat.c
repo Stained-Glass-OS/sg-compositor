@@ -393,6 +393,7 @@ volume_key(const char *verb, const char *dir)
  * 2026-10-03, "to reload the wine software"): SG_RELOAD_COMMAND, which the
  * session gives (sg-session's sg-wine-reload: this account's Windows programs
  * ended, the shell brought back). Not over a lock or a secure prompt. */
+#ifndef SG_MUTANT_NO_RELOAD_KEY
 static void
 reload_key(void)
 {
@@ -412,6 +413,7 @@ reload_key(void)
 	}
 	waitpid(pid, NULL, 0);
 }
+#endif
 
 static bool
 handle_reserved_key(struct cg_seat *seat, uint32_t modifiers, const xkb_keysym_t *syms, int nsyms)
@@ -430,13 +432,13 @@ handle_reserved_key(struct cg_seat *seat, uint32_t modifiers, const xkb_keysym_t
 		bool win_l = (modifiers & WLR_MODIFIER_LOGO) && (syms[i] == XKB_KEY_l || syms[i] == XKB_KEY_L);
 		bool sas = (modifiers & WLR_MODIFIER_CTRL) && (modifiers & WLR_MODIFIER_ALT) &&
 			   (syms[i] == XKB_KEY_Delete || syms[i] == XKB_KEY_KP_Delete);
-		bool reload = (syms[i] == XKB_KEY_Terminate_Server) ||
-			      ((modifiers & WLR_MODIFIER_CTRL) && (modifiers & WLR_MODIFIER_ALT) && syms[i] == XKB_KEY_BackSpace);
 		if (win_l) {
 			lock_engage(&seat->server->lock);
 			return true;
 		}
 #ifndef SG_MUTANT_NO_RELOAD_KEY
+		bool reload = (syms[i] == XKB_KEY_Terminate_Server) ||
+			      ((modifiers & WLR_MODIFIER_CTRL) && (modifiers & WLR_MODIFIER_ALT) && syms[i] == XKB_KEY_BackSpace);
 		if (reload && !seat->server->lock.locked && !seat->server->lock.secure && !seat->server->lock.sas) {
 			reload_key();
 			return true;

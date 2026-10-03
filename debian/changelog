@@ -3,7 +3,8 @@ sg-compositor (0.2.0+sg31) unstable; urgency=medium
   * Ctrl+Alt+Backspace runs the session's SG_RELOAD_COMMAND (sg-session's
     sg-wine-reload: the Windows side started again) -- not over a lock, a
     secure prompt or the security screen; no client sees the key (David
-    2026-10-03). Gate: test/sas-gate.sh (mutant SG_MUTANT_NO_RELOAD_KEY).
+    2026-10-03). Gate: test/sas-gate.sh (mutant SG_MUTANT_NO_RELOAD_KEY,
+    which now builds: the whole key under its guard).
 
  -- Stained Glass OS <ke7oxh@gmail.com>  Sat, 03 Oct 2026 15:45:00 +0000
 
