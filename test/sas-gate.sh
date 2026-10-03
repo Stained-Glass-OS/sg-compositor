@@ -1,5 +1,7 @@
 #!/bin/sh
 # Reserved keys: Win+L and the secure attention sequence (Ctrl+Alt+Del).
+# Ctrl+Alt+Backspace runs the session's SG_RELOAD_COMMAND (the Windows side
+# started again, David 2026-10-03) -- never over a lock.
 #
 # Win+L locks. Ctrl+Alt+Del puts up the security screen when a lock service
 # is watching (SAS cancel / taskmgr / signout end it, the last two run in the
@@ -21,7 +23,7 @@ fail() { echo "FAIL  $*"; RC=1; }
 for t in wtype xev xdotool python3; do command -v "$t" >/dev/null || { echo "SKIP: $t missing"; exit 77; }; done
 
 printf '#!/bin/sh\necho "$1 $WAYLAND_DISPLAY" >> %s/actions\n' "$T" > "$T/sas-action"; chmod 755 "$T/sas-action"
-SG_SAS_ACTION="$T/sas-action" WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 WLR_RENDERER=pixman \
+SG_RELOAD_COMMAND="echo reloaded >> $T/reloads" SG_SAS_ACTION="$T/sas-action" WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 WLR_RENDERER=pixman \
     "$COMP" -L "$T/priv.sock" -C "$T/ctl.sock" -U "$(id -u)" -- \
     sh -c "echo \$DISPLAY > $T/xd; exec xev -event keyboard" >"$T/xev.txt" 2>"$T/log" &
 CP=$!
@@ -54,6 +56,13 @@ ctl UNLOCK >/dev/null; focus
 
 inj -M ctrl -M alt -k Delete -m alt -m ctrl
 [ "$(ctl STATUS)" = "OK locked" ] && pass "Ctrl+Alt+Del with no lock service watching locks" || fail "Ctrl+Alt+Del did not lock"
+ctl UNLOCK >/dev/null; focus
+
+inj -M ctrl -M alt -k BackSpace -m alt -m ctrl
+[ "$(wc -l < "$T/reloads" 2>/dev/null)" = 1 ] && pass "Ctrl+Alt+Backspace runs the session's reload command" || fail "no reload: $(cat "$T/reloads" 2>/dev/null)"
+ctl LOCK >/dev/null; sleep 0.5
+inj -M ctrl -M alt -k BackSpace -m alt -m ctrl
+[ "$(wc -l < "$T/reloads" 2>/dev/null)" = 1 ] && pass "but not over a lock" || fail "reloaded over a lock"
 ctl UNLOCK >/dev/null; focus
 
 # With a lock service watching: the security screen.
@@ -90,9 +99,9 @@ kill "$WP" 2>/dev/null
 inj c
 presses | grep -qx c && pass "input resumes after unlock" || fail "input did not resume after unlock"
 
-if presses | grep -qxE 'l|L|Delete|KP_Delete'; then fail "a reserved key's press reached the client"
+if presses | grep -qxE 'l|L|Delete|KP_Delete|BackSpace'; then fail "a reserved key's press reached the client"
 else pass "no reserved key's press reached the client"; fi
-if releases | grep -qxE 'l|L|Delete|KP_Delete'; then fail "a reserved key's release reached the client"
+if releases | grep -qxE 'l|L|Delete|KP_Delete|BackSpace'; then fail "a reserved key's release reached the client"
 else pass "no reserved key's release reached the client"; fi
 
 echo
