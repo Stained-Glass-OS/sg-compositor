@@ -87,9 +87,9 @@ view_center(struct cg_view *view, struct wlr_box *layout_box)
 	view->ly = layout_box->y + (layout_box->height - height) / 2;
 	/* the title bar above it is part of what is centred */
 	if (view->decorated) {
-		view->ly = layout_box->y + (layout_box->height - height - DECOR_TITLE_H) / 2 + DECOR_TITLE_H;
-		if (view->ly < layout_box->y + DECOR_TITLE_H) {
-			view->ly = layout_box->y + DECOR_TITLE_H;
+		view->ly = layout_box->y + (layout_box->height - height - decor_title_h()) / 2 + decor_title_h();
+		if (view->ly < layout_box->y + decor_title_h()) {
+			view->ly = layout_box->y + decor_title_h();
 		}
 	}
 
@@ -174,8 +174,8 @@ view_position(struct cg_view *view)
 		struct wlr_box box = layout_box;
 		box.height -= DECOR_TASKBAR_H;
 		if (view->decorated) {
-			box.y += DECOR_TITLE_H;
-			box.height -= DECOR_TITLE_H;
+			box.y += decor_title_h();
+			box.height -= decor_title_h();
 		}
 		if (!view->maximized) {
 			view->restore = (struct wlr_box){box.x + box.width / 6, box.y + box.height / 6, box.width * 2 / 3,

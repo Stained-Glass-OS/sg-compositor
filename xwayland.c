@@ -17,6 +17,7 @@
 #include "decor.h"
 #include "elevated.h"
 #include "server.h"
+#include "session_x11.h"
 #include "view.h"
 #include "xwayland.h"
 
@@ -214,6 +215,7 @@ handle_xwayland_surface_unmap(struct wl_listener *listener, void *data)
 		xwayland_view->or_geometry = false;
 	}
 	decor_destroy(view);
+	session_x11_unhold(view);
 	view_unmap(view);
 }
 
@@ -251,6 +253,8 @@ handle_xwayland_surface_map(struct wl_listener *listener, void *data)
 		}
 		wlr_xwayland_surface_configure(xs, view->lx, view->ly, xs->width, xs->height);
 		wlr_xwayland_surface_restack(xs, NULL, XCB_STACK_MODE_ABOVE);
+		/* the taskbar frames it in a moment: shown then, in its frame */
+		session_x11_hold(view);
 	}
 }
 
@@ -265,6 +269,7 @@ handle_xwayland_surface_destroy(struct wl_listener *listener, void *data)
 		xwayland_view->or_geometry = false;
 	}
 	decor_destroy(view);
+	session_x11_unhold(view);
 	wl_list_remove(&xwayland_view->destroy.link);
 	wl_list_remove(&xwayland_view->request_fullscreen.link);
 	if (view->elevated) {

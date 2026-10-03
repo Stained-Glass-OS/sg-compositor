@@ -34,6 +34,10 @@
  *   shadows=1|0      shadow=modern|horizon|glass
  *   animations=1|0   (0: "Show animations" off -- no effect moves at all)
  *   open=none|fade|zoom   minimize=none|scale|lamp   wobbly=0|1   moving=0|1
+ *   glass=N          the Glass look's frames see-through, N% opaque over a
+ *                    blur (wine-sg 0801's _SG_FRAME: the client area stays
+ *                    opaque); 0 solid
+ *   background=static|light|cells   the animated background (below)
  *
  *   sg-deskcomp [-display DPY] [-window XID] [-dump FILE]
  *
@@ -55,6 +59,7 @@
 #include <math.h>
 #include <poll.h>
 #include <signal.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -87,6 +92,7 @@ struct win {
 	int wobbling, anchor;
 	unsigned long acrylic;      /* _SG_ACRYLIC: frosted, this opaque in percent (0: not) */
 	int has_minrect, minrect[4];  /* _SG_MINRECT: its taskbar button, x y w h (wine-sg 0751) */
+	int has_frame, frame[4];      /* _SG_FRAME: where its client area is, left top right bottom (wine-sg 0801) */
 	float ox[GRID * GRID], oy[GRID * GRID], vx[GRID * GRID], vy[GRID * GRID];
 };
 
@@ -102,7 +108,7 @@ static XserverRegion damage_all;
 static int damage_event, damage_error, xfixes_event, xfixes_error, shape_event, shape_error;
 static struct win *wins;
 static int nwins, capwins;
-static Atom atom_shadow, atom_opacity, atom_bgpixmap, atom_acrylic, atom_minrect;
+static Atom atom_shadow, atom_opacity, atom_bgpixmap, atom_acrylic, atom_minrect, atom_frame, atom_wppixmap;
 static const char *dump_path;
 static volatile sig_atomic_t quit;
 static int trapped;
@@ -112,6 +118,9 @@ static double last_frame;
 
 /* the settings */
 static int opt_shadows = 1, opt_anim = 1, opt_wobbly = 0, opt_moving = 0;
+static int opt_glass = 0;           /* the Glass look's frames: see-through over a blur, this opaque in percent (0: solid) */
+enum { BG_STATIC, BG_LIGHT, BG_CELLS };
+static int opt_background = BG_STATIC;   /* the animated background (Settings > Background) */
 static char opt_shadow[16] = "modern", opt_open[16] = "none", opt_minimize[16] = "none";
 static char conf_path[512];
 static time_t conf_mtime;
@@ -132,6 +141,7 @@ static int error_handler(Display *d, XErrorEvent *e)
 }
 
 static void damage_rect(int x, int y, int w, int h);
+static void load_wallpaper(void);
 
 static void read_settings(void)
 {
@@ -144,6 +154,8 @@ static void read_settings(void)
 	conf_mtime = st.st_mtime;
 	conf_size = st.st_size;
 	if (!(f = fopen(conf_path, "r"))) return;
+	opt_glass = 0;
+	opt_background = BG_STATIC;
 	while (fgets(line, sizeof(line), f)) {
 		char *eq = strchr(line, '='), *v;
 		if (!eq) continue;
@@ -154,6 +166,8 @@ static void read_settings(void)
 		else if (!strcmp(line, "animations")) opt_anim = atoi(v) != 0;
 		else if (!strcmp(line, "wobbly")) opt_wobbly = atoi(v) != 0;
 		else if (!strcmp(line, "moving")) opt_moving = atoi(v) != 0;
+		else if (!strcmp(line, "glass")) { opt_glass = atoi(v); if (opt_glass < 0 || opt_glass >= 100) opt_glass = 0; }
+		else if (!strcmp(line, "background")) opt_background = !strcmp(v, "light") ? BG_LIGHT : !strcmp(v, "cells") ? BG_CELLS : BG_STATIC;
 		else if (!strcmp(line, "shadow")) snprintf(opt_shadow, sizeof(opt_shadow), "%s", v);
 		else if (!strcmp(line, "open")) snprintf(opt_open, sizeof(opt_open), "%s", v);
 		else if (!strcmp(line, "minimize")) snprintf(opt_minimize, sizeof(opt_minimize), "%s", v);
@@ -221,6 +235,32 @@ static void read_minrect(struct win *w)
 		w->has_minrect = w->minrect[2] > 0 && w->minrect[3] > 0;
 	}
 	if (data) XFree(data);
+}
+
+/* where the window's client area is, inside its frame (wine-sg 0801) */
+static void read_frame(struct win *w)
+{
+	Atom actual;
+	int fmt;
+	unsigned long n, left;
+	unsigned char *data = NULL;
+	w->has_frame = 0;
+	if (XGetWindowProperty(dpy, w->id, atom_frame, 0, 4, False, XA_CARDINAL, &actual, &fmt, &n, &left, &data) == Success &&
+	    data && n == 4 && fmt == 32) {
+		for (int i = 0; i < 4; i++) w->frame[i] = (int)((long *)data)[i];
+		w->has_frame = w->frame[0] >= 0 && w->frame[1] > 0 && w->frame[2] >= 0 && w->frame[3] >= 0;
+	}
+	if (data) XFree(data);
+}
+
+/* the window's frame is glass: see-through over a blur, its client area opaque */
+static int glass_frame(struct win *w)
+{
+#ifdef SG_MUTANT_SOLID_FRAMES
+	return 0;
+#endif
+	return opt_glass > 0 && w->has_frame && !w->argb && w->kind == KIND_FRAMED &&
+	       w->frame[0] + w->frame[2] < w->w && w->frame[1] + w->frame[3] < w->h;
 }
 
 /* the shadow a window has: wine-sg 0744 says, from its styles */
@@ -397,6 +437,7 @@ static void add_window(Window id)
 	w->kind = window_kind(id);
 	w->opacity = prop_card(id, atom_opacity, XA_CARDINAL, 0xffffffff);
 	w->acrylic = prop_card(id, atom_acrylic, XA_CARDINAL, 0);
+	read_frame(w);
 	XShapeSelectInput(dpy, id, ShapeNotifyMask);
 	get_shape(w);
 	if (w->mapped) { get_pictures(w); damage_win(w); }
@@ -793,6 +834,28 @@ static int draw_window(struct win *w, double t)
 		} else
 			XFixesSetRegion(dpy, clip, &(XRectangle){ w->x, w->y, ww, wh }, 1);
 		XFixesIntersectRegion(dpy, clip, clip, damage_all);
+		if (glass_frame(w) && !w->acrylic) {
+			/* the Glass look: the frame see-through over a blur of what is
+			 * below, then the client area over it, opaque */
+			XRectangle cr = { w->x + w->bw + w->frame[0], w->y + w->bw + w->frame[1],
+			                  w->w - w->frame[0] - w->frame[2], w->h - w->frame[1] - w->frame[3] };
+			XserverRegion client = XFixesCreateRegion(dpy, &cr, 1), frame = XFixesCreateRegion(dpy, NULL, 0);
+			Picture fmask = solid(fade * opacity * opt_glass / 100.0);
+			XFixesSubtractRegion(dpy, frame, clip, client);
+			XFixesIntersectRegion(dpy, client, client, clip);
+			XFixesSetPictureClipRegion(dpy, buffer_pict, 0, 0, frame);
+			blur_below(w->x, w->y, ww, wh);
+			XRenderComposite(dpy, PictOpOver, w->pict, fmask, buffer_pict, 0, 0, 0, 0, w->x, w->y, ww, wh);
+			XFixesSetPictureClipRegion(dpy, buffer_pict, 0, 0, client);
+			XRenderComposite(dpy, mask ? PictOpOver : PictOpSrc, w->pict, mask, buffer_pict, 0, 0, 0, 0, w->x, w->y, ww, wh);
+			XFixesSetPictureClipRegion(dpy, buffer_pict, 0, 0, damage_all);
+			XRenderFreePicture(dpy, fmask);
+			XFixesDestroyRegion(dpy, client);
+			XFixesDestroyRegion(dpy, frame);
+			XFixesDestroyRegion(dpy, clip);
+			if (mask) XRenderFreePicture(dpy, mask);
+			return busy;
+		}
 		XFixesSetPictureClipRegion(dpy, buffer_pict, 0, 0, clip);
 #ifdef SG_MUTANT_OPAQUE
 		XRenderComposite(dpy, PictOpSrc, w->pict, None, buffer_pict, 0, 0, 0, 0, w->x, w->y, ww, wh);
@@ -805,6 +868,432 @@ static int draw_window(struct win *w, double t)
 	}
 	if (mask) XRenderFreePicture(dpy, mask);
 	return busy;
+}
+
+/* ---- the animated background --------------------------------------------- *
+ *
+ * Settings > Personalization > Background > Animated background (David
+ * 2026-10-02: "an active background instead of the single wallpaper"), off
+ * by default:
+ *   light  a soft light drifts behind the picture and shines through it --
+ *          the picture dimmed, and brightened again in its own colours where
+ *          the light is (the picture added through the light's round falloff);
+ *   cells  the picture as stained glass: cells of its colours with dark lead
+ *          lines between them, the cells drifting slowly, and gathering round
+ *          the open windows -- a ring of cells along each window's edges, so
+ *          the lead lines run round it, moving to it as it opens and moves.
+ * The icons stay crisp over it: explorer sends the picture without them too
+ * (wine-sg 0804, _SG_WALLPAPER_PIXMAP), and they are the pixels where the
+ * desktop's picture is not the wallpaper.
+ * Cheap: the light at 8 frames a second, only where it is and not under
+ * windows; the cells drawn at half size, 2 frames a second while they drift
+ * (12 while they move to the windows); nothing while a full-screen program
+ * is on top (X draws it) or on battery below 20 % ("battery saver"), and half
+ * as often on battery. */
+static Picture wp_pict, icon_mask, cells_pict;
+static Pixmap cells_pixmap;
+static int cells_w, cells_h;
+static double anim_next;          /* when the next frame is due (0: none) */
+static unsigned long anim_frames;
+static int anim_battery;          /* 0 mains, 1 on battery, 2 battery saver (paused) */
+static double battery_checked;
+static XRectangle light_box;      /* where the light was drawn last */
+static int light_x, light_y, light_r;
+
+static Picture make_mask(int w, int h, unsigned char *data)
+{
+	Pixmap pm = XCreatePixmap(dpy, desktop, w, h, 8);
+	XImage *img = XCreateImage(dpy, DefaultVisual(dpy, DefaultScreen(dpy)), 8, ZPixmap, 0, (char *)data, w, h, 32, (w + 3) & ~3);
+	GC gc = XCreateGC(dpy, pm, 0, NULL);
+	Picture p;
+	XPutImage(dpy, pm, gc, img, 0, 0, 0, 0, w, h);
+	XFreeGC(dpy, gc);
+	XDestroyImage(img);   /* frees data */
+	p = XRenderCreatePicture(dpy, pm, a8_format, 0, NULL);
+	XFreePixmap(dpy, pm);
+	return p;
+}
+
+/* the wallpaper without the icons, and where the icons are */
+static void load_wallpaper(void)
+{
+	Pixmap wp = prop_card(desktop, atom_wppixmap, XA_PIXMAP, 0), dp = prop_card(desktop, atom_bgpixmap, XA_PIXMAP, 0);
+	XImage *a = NULL, *b = NULL;
+	if (wp_pict) XRenderFreePicture(dpy, wp_pict);
+	if (icon_mask) XRenderFreePicture(dpy, icon_mask);
+	wp_pict = icon_mask = 0;
+	if (!wp || !dp || opt_background == BG_STATIC) return;
+	trapped = 0;
+	a = XGetImage(dpy, wp, 0, 0, dw, dh, AllPlanes, ZPixmap);
+	b = XGetImage(dpy, dp, 0, 0, dw, dh, AllPlanes, ZPixmap);
+	XSync(dpy, False);
+	if (!trapped && a && b && a->bits_per_pixel == 32 && b->bits_per_pixel == 32) {
+		int stride = (dw + 3) & ~3;
+		unsigned char *m = calloc(1, (size_t)stride * dh);
+		if (m) {
+			for (int y = 0; y < dh; y++) {
+				const uint32_t *ra = (const uint32_t *)(a->data + (size_t)y * a->bytes_per_line);
+				const uint32_t *rb = (const uint32_t *)(b->data + (size_t)y * b->bytes_per_line);
+				for (int x = 0; x < dw; x++)
+					if ((ra[x] ^ rb[x]) & 0xffffff) {
+						/* and a pixel round it: the text's soft edges */
+						for (int yy = y - 1; yy <= y + 1; yy++)
+							for (int xx = x - 1; xx <= x + 1; xx++)
+								if (yy >= 0 && yy < dh && xx >= 0 && xx < dw) m[(size_t)yy * stride + xx] = 255;
+					}
+			}
+			icon_mask = make_mask(dw, dh, m);
+			trapped = 0;
+			wp_pict = XRenderCreatePicture(dpy, wp, format, 0, NULL);
+			XSync(dpy, False);
+			if (trapped) wp_pict = 0;
+		}
+	}
+	if (a) XDestroyImage(a);
+	if (b) XDestroyImage(b);
+}
+
+/* battery saver: on battery below 20 % (as Windows' battery saver comes on) */
+static void check_battery(double t)
+{
+	FILE *f;
+	char path[300], buf[64];
+	int on_battery = 0, low = 0;
+	if (t - battery_checked < 30) return;
+	battery_checked = t;
+	for (int i = 0; i < 4; i++) {
+		snprintf(path, sizeof(path), "/sys/class/power_supply/BAT%d/status", i);
+		if (!(f = fopen(path, "r"))) continue;
+		if (fgets(buf, sizeof(buf), f) && !strncmp(buf, "Discharging", 11)) {
+			on_battery = 1;
+			fclose(f);
+			snprintf(path, sizeof(path), "/sys/class/power_supply/BAT%d/capacity", i);
+			if ((f = fopen(path, "r"))) {
+				if (fgets(buf, sizeof(buf), f) && atoi(buf) <= 20) low = 1;
+				fclose(f);
+			}
+			break;
+		}
+		fclose(f);
+	}
+	/* the gate's stand-in for a battery: SG_DESKCOMP_FAKE_BATTERY=PERCENT, discharging */
+	if (getenv("SG_DESKCOMP_FAKE_BATTERY")) { on_battery = 1; low = atoi(getenv("SG_DESKCOMP_FAKE_BATTERY")) <= 20; }
+#ifdef SG_MUTANT_NO_BATTERY_SAVER
+	low = 0;
+#endif
+	anim_battery = low ? 2 : on_battery;
+}
+
+/* the opaque windows' union: what no background change can be seen under */
+static XserverRegion covered(void)
+{
+	XserverRegion r = XFixesCreateRegion(dpy, NULL, 0);
+	for (int i = 0; i < nwins; i++) {
+		struct win *w = &wins[i];
+		XRectangle rect = { w->x, w->y, w->w + 2 * w->bw, w->h + 2 * w->bw };
+		XserverRegion one;
+		if (!w->mapped || w->ghost || w->argb || w->opacity != 0xffffffff || w->acrylic || w->x <= OFFSCREEN || w->anim != ANIM_NONE)
+			continue;
+		if (glass_frame(w)) {   /* only its client area hides the background */
+			rect.x += w->bw + w->frame[0]; rect.y += w->bw + w->frame[1];
+			rect.width = w->w - w->frame[0] - w->frame[2]; rect.height = w->h - w->frame[1] - w->frame[3];
+		}
+		one = w->shape ? XFixesCreateRegion(dpy, NULL, 0) : XFixesCreateRegion(dpy, &rect, 1);
+		if (w->shape) {
+			XFixesCopyRegion(dpy, one, w->shape);
+			XFixesTranslateRegion(dpy, one, w->x + w->bw, w->y + w->bw);
+		}
+		XFixesUnionRegion(dpy, r, r, one);
+		XFixesDestroyRegion(dpy, one);
+	}
+	return r;
+}
+
+/* damage what is not covered of a rectangle; 0 when all of it is */
+static int damage_uncovered(XRectangle *box)
+{
+	XserverRegion r = XFixesCreateRegion(dpy, box, 1), c = covered();
+	XRectangle ext, *rects;
+	int n = 0;
+	XFixesSubtractRegion(dpy, r, r, c);
+	rects = XFixesFetchRegionAndBounds(dpy, r, &n, &ext);
+	if (rects) XFree(rects);
+	if (n) XFixesUnionRegion(dpy, damage_all, damage_all, r);
+	XFixesDestroyRegion(dpy, r);
+	XFixesDestroyRegion(dpy, c);
+	return n;
+}
+
+/* the light's place at time t: a slow figure across the screen */
+static void light_at(double t, int *x, int *y, int *r)
+{
+	*r = (dh > dw ? dw : dh) * 4 / 10;
+	*x = (int)(dw * (0.5 + 0.40 * sin(t * 0.061)));
+	*y = (int)(dh * (0.5 + 0.32 * sin(t * 0.043 + 1.3)));
+}
+
+/* ---- the cells ---- */
+#define MAX_SITES 1400
+struct site { float x, y, tx, ty, ph; uint32_t color; };
+static struct site sites[MAX_SITES];
+static int nsites, nbase;
+static double cells_move_until;
+static unsigned long layout_sig;
+
+static uint32_t hash32(uint32_t v) { v ^= v >> 16; v *= 0x7feb352d; v ^= v >> 15; v *= 0x846ca68b; v ^= v >> 16; return v; }
+
+/* the wallpaper's colour about a point, from a small copy of it */
+static XImage *thumb;
+static int thumb_w, thumb_h;
+static void make_thumb(void)
+{
+	Picture src = wp_pict ? wp_pict : bg_pict;
+	Pixmap pm;
+	Picture p;
+	if (thumb) { XDestroyImage(thumb); thumb = NULL; }
+	if (!src) return;
+	thumb_w = dw / 16 + 1; thumb_h = dh / 16 + 1;
+	pm = XCreatePixmap(dpy, desktop, thumb_w, thumb_h, depth);
+	p = XRenderCreatePicture(dpy, pm, format, 0, NULL);
+	XRenderSetPictureFilter(dpy, src, "bilinear", NULL, 0);
+	set_transform(src, 16, 0, 0, 0, 16, 0);
+	XRenderComposite(dpy, PictOpSrc, src, None, p, 0, 0, 0, 0, 0, 0, thumb_w, thumb_h);
+	reset_transform(src);
+	thumb = XGetImage(dpy, pm, 0, 0, thumb_w, thumb_h, AllPlanes, ZPixmap);
+	XRenderFreePicture(dpy, p);
+	XFreePixmap(dpy, pm);
+}
+
+static uint32_t thumb_color(float x, float y)
+{
+	int tx = (int)(x / 16), ty = (int)(y / 16);
+	if (!thumb || thumb->bits_per_pixel != 32) return 0x406080;
+	if (tx < 0) tx = 0;
+	if (ty < 0) ty = 0;
+	if (tx >= thumb_w) tx = thumb_w - 1;
+	if (ty >= thumb_h) ty = thumb_h - 1;
+	return *(uint32_t *)(thumb->data + (size_t)ty * thumb->bytes_per_line + tx * 4) & 0xffffff;
+}
+
+/* the cells' sites: a jittered grid, and rings round the windows */
+static void place_sites(int moving)
+{
+	int spacing = (dh > dw ? dw : dh) / 9, n = 0;
+	unsigned long sig = 0;
+	if (spacing < 40) spacing = 40;
+	if (!nbase) {
+		for (int gy = 0; gy * spacing < dh + spacing && n < MAX_SITES / 2; gy++)
+			for (int gx = 0; gx * spacing < dw + spacing && n < MAX_SITES / 2; gx++) {
+				uint32_t h = hash32(gx * 7919 + gy * 104729 + 17);
+				sites[n].x = sites[n].tx = gx * spacing + (float)(h % spacing) - spacing / 2.0f;
+				sites[n].y = sites[n].ty = gy * spacing + (float)((h >> 12) % spacing) - spacing / 2.0f;
+				sites[n].ph = (float)(h % 628) / 100.0f;
+				n++;
+			}
+		nbase = nsites = n;
+	}
+	n = nbase;
+	for (int i = 0; i < nwins && n < MAX_SITES; i++) {
+		struct win *w = &wins[i];
+		int x0, y0, x1, y1, ring = spacing / 4 + 6, step = spacing / 2;
+		if (!w->mapped || w->ghost || w->kind != KIND_FRAMED || w->x <= OFFSCREEN) continue;
+		x0 = w->x - ring; y0 = w->y - ring; x1 = w->x + w->w + 2 * w->bw + ring; y1 = w->y + w->h + 2 * w->bw + ring;
+		sig = sig * 31 + (unsigned long)(x0 * 3 + y0 * 7 + x1 * 11 + y1 * 13);
+		/* along the four sides, outside the window: the lead lines between
+		 * these and the sites inside run round it */
+		for (int x = x0; x <= x1 && n + 4 < MAX_SITES; x += step) {
+			sites[n].tx = x; sites[n].ty = y0; n++;
+			sites[n].tx = x; sites[n].ty = y1; n++;
+			sites[n].tx = x; sites[n].ty = y0 + 2 * ring; n++;
+			sites[n].tx = x; sites[n].ty = y1 - 2 * ring; n++;
+		}
+		for (int y = y0 + step; y < y1 && n + 4 < MAX_SITES; y += step) {
+			sites[n].tx = x0; sites[n].ty = y; n++;
+			sites[n].tx = x1; sites[n].ty = y; n++;
+			sites[n].tx = x0 + 2 * ring; sites[n].ty = y; n++;
+			sites[n].tx = x1 - 2 * ring; sites[n].ty = y; n++;
+		}
+	}
+	for (int i = nbase; i < n; i++) {
+		if (i >= nsites) {   /* new: from the nearest window edge's middle */
+			sites[i].x = sites[i].tx; sites[i].y = sites[i].ty;
+			sites[i].ph = (float)(hash32(i) % 628) / 100.0f;
+		}
+	}
+	nsites = n;
+	if (sig != layout_sig) {
+		layout_sig = sig;
+		if (moving) cells_move_until = now() + 0.9;
+	}
+	for (int i = 0; i < nsites; i++) sites[i].color = thumb_color(sites[i].tx, sites[i].ty);
+}
+
+/* the cells, at half size: each pixel its nearest site's colour, shaded
+ * towards its edges, with dark lead lines between them */
+static void render_cells(double t)
+{
+	int w = dw / 2 + 1, h = dh / 2 + 1, bs = 48, bw = w / bs + 1, bh = h / bs + 1;
+	static int *bucket_start, *bucket_items, nb;
+	float px[MAX_SITES], py[MAX_SITES];
+	uint32_t *data;
+	XImage *img;
+	GC gc;
+
+	if (!cells_pixmap || cells_w != w || cells_h != h) {
+		if (cells_pict) XRenderFreePicture(dpy, cells_pict);
+		if (cells_pixmap) XFreePixmap(dpy, cells_pixmap);
+		cells_pixmap = XCreatePixmap(dpy, desktop, w, h, depth);
+		cells_pict = XRenderCreatePicture(dpy, cells_pixmap, format, 0, NULL);
+		XRenderSetPictureFilter(dpy, cells_pict, "bilinear", NULL, 0);
+		set_transform(cells_pict, 0.5, 0, 0, 0, 0.5, 0);
+		cells_w = w; cells_h = h;
+	}
+	/* where each site is now: drifting about its place, moving to its target */
+	for (int i = 0; i < nsites; i++) {
+		float k = cells_move_until > t ? 0.22f : 1.0f;
+		sites[i].x += (sites[i].tx - sites[i].x) * k;
+		sites[i].y += (sites[i].ty - sites[i].y) * k;
+		px[i] = (sites[i].x + 9.0f * sinf((float)t * 0.31f + sites[i].ph)) / 2;
+		py[i] = (sites[i].y + 9.0f * cosf((float)t * 0.27f + sites[i].ph * 1.7f)) / 2;
+	}
+	/* sites into buckets */
+	if (nb != bw * bh) {
+		free(bucket_start);
+		bucket_start = calloc(bw * bh + 1, sizeof(int));
+		nb = bw * bh;
+	}
+	free(bucket_items);
+	bucket_items = malloc(sizeof(int) * (nsites + 1));
+	if (!bucket_start || !bucket_items) return;
+	memset(bucket_start, 0, sizeof(int) * (nb + 1));
+	for (int i = 0; i < nsites; i++) {
+		int bx = (int)px[i] / bs, by = (int)py[i] / bs;
+		if (bx < 0) bx = 0;
+		if (by < 0) by = 0;
+		if (bx >= bw) bx = bw - 1;
+		if (by >= bh) by = bh - 1;
+		bucket_start[by * bw + bx + 1]++;
+	}
+	for (int b = 0; b < nb; b++) bucket_start[b + 1] += bucket_start[b];
+	{
+		int *fillp = calloc(nb, sizeof(int));
+		if (!fillp) return;
+		for (int i = 0; i < nsites; i++) {
+			int bx = (int)px[i] / bs, by = (int)py[i] / bs;
+			if (bx < 0) bx = 0;
+			if (by < 0) by = 0;
+			if (bx >= bw) bx = bw - 1;
+			if (by >= bh) by = bh - 1;
+			bucket_items[bucket_start[by * bw + bx] + fillp[by * bw + bx]++] = i;
+		}
+		free(fillp);
+	}
+	data = malloc((size_t)w * h * 4);
+	if (!data) return;
+	for (int y = 0; y < h; y++) {
+		int by = y / bs;
+		for (int x = 0; x < w; x++) {
+			int bx = x / bs, best = 0, second = 0, r;
+			float d1 = 1e18f, d2 = 1e18f;
+			for (r = 1; r <= 2; r++) {
+				for (int yy = by - r; yy <= by + r; yy++) {
+					if (yy < 0 || yy >= bh) continue;
+					for (int xx = bx - r; xx <= bx + r; xx++) {
+						if (xx < 0 || xx >= bw || (r == 2 && yy > by - 2 && yy < by + 2 && xx > bx - 2 && xx < bx + 2)) continue;
+						for (int k = bucket_start[yy * bw + xx]; k < bucket_start[yy * bw + xx + 1]; k++) {
+							int i = bucket_items[k];
+							float dx = px[i] - x, dy = py[i] - y, d = dx * dx + dy * dy;
+							if (d < d1) { d2 = d1; second = best; d1 = d; best = i; }
+							else if (d < d2) { d2 = d; second = i; }
+						}
+					}
+				}
+				if (d2 < (float)(r * bs) * (r * bs)) break;   /* the ring searched holds the two nearest */
+			}
+			{
+				float sx = px[second] - px[best], sy = py[second] - py[best], sep = sqrtf(sx * sx + sy * sy);
+				float edge = sep > 0 ? (d2 - d1) / (2 * sep) : 99;   /* distance to the cells' border */
+				uint32_t c = sites[best].color, out;
+				int rr = (c >> 16) & 0xff, gg = (c >> 8) & 0xff, bb = c & 0xff;
+				if (edge < 1.3f) { rr = 34; gg = 30; bb = 40; }          /* the lead */
+				else {
+					/* glass: lit in the middle, darker toward the lead */
+					float shade = edge > 14 ? 1.12f : 0.82f + edge * 0.0215f;
+					rr = (int)(rr * shade); gg = (int)(gg * shade); bb = (int)(bb * shade);
+					if (rr > 255) rr = 255;
+					if (gg > 255) gg = 255;
+					if (bb > 255) bb = 255;
+				}
+				out = (uint32_t)rr << 16 | (uint32_t)gg << 8 | (uint32_t)bb;
+				data[(size_t)y * w + x] = out;
+			}
+		}
+	}
+	img = XCreateImage(dpy, visual, depth, ZPixmap, 0, (char *)data, w, h, 32, w * 4);
+	gc = XCreateGC(dpy, cells_pixmap, 0, NULL);
+	XPutImage(dpy, cells_pixmap, gc, img, 0, 0, 0, 0, w, h);
+	XFreeGC(dpy, gc);
+	XDestroyImage(img);   /* frees data */
+}
+
+/* a frame of the animation is due: what changes is damaged */
+static void animate(double t)
+{
+	if (opt_background == BG_STATIC || !bg_pict || direct) { anim_next = 0; return; }
+	check_battery(t);
+	if (anim_battery == 2) { anim_next = 0; return; }   /* battery saver: still */
+	if (anim_next && t < anim_next) return;
+	if (opt_background == BG_LIGHT) {
+		int x, y, r;
+		XRectangle box;
+		light_at(t, &x, &y, &r);
+		box.x = x - r; box.y = y - r; box.width = 2 * r; box.height = 2 * r;
+		if (light_box.width) damage_uncovered(&light_box);
+		damage_uncovered(&box);
+		light_box = box;
+		light_x = x; light_y = y; light_r = r;
+		anim_next = t + (anim_battery ? 0.25 : 0.125);
+	} else {
+		XRectangle all = { 0, 0, dw, dh };
+		if (!thumb) make_thumb();
+		place_sites(1);
+		render_cells(t);
+		damage_uncovered(&all);
+		anim_next = t + (cells_move_until > t ? 1.0 / 12 : anim_battery ? 1.0 : 0.5);
+	}
+	anim_frames++;
+}
+
+/* the background, animated, under what was damaged (buffer_pict's clip) */
+static void draw_background(void)
+{
+	Picture base = wp_pict ? wp_pict : bg_pict;
+#ifdef SG_MUTANT_STATIC_BACKGROUND
+	XRenderComposite(dpy, PictOpSrc, bg_pict, None, buffer_pict, 0, 0, 0, 0, 0, 0, dw, dh);
+	return;
+#endif
+	if (opt_background == BG_LIGHT) {
+		/* the picture dimmed, then added again through the light's falloff:
+		 * brighter in its own colours where the light is */
+		XRenderColor veil = { 0, 0, 0, 0x4800 };
+		XRenderComposite(dpy, PictOpSrc, base, None, buffer_pict, 0, 0, 0, 0, 0, 0, dw, dh);
+		XRenderFillRectangle(dpy, PictOpOver, buffer_pict, &veil, 0, 0, dw, dh);
+		if (light_r > 0) {
+			XRadialGradient g = { { XDoubleToFixed(light_x), XDoubleToFixed(light_y), 0 },
+			                      { XDoubleToFixed(light_x), XDoubleToFixed(light_y), XDoubleToFixed(light_r) } };
+			XFixed stops[3] = { XDoubleToFixed(0), XDoubleToFixed(0.45), XDoubleToFixed(1) };
+			XRenderColor cols[3] = { { 0, 0, 0, 0xb000 }, { 0, 0, 0, 0x5000 }, { 0, 0, 0, 0 } };
+			Picture light = XRenderCreateRadialGradient(dpy, &g, stops, cols, 3);
+			XRenderComposite(dpy, PictOpAdd, base, light, buffer_pict, 0, 0, 0, 0, 0, 0, dw, dh);
+			XRenderFreePicture(dpy, light);
+		}
+	} else if (opt_background == BG_CELLS && cells_pict) {
+		XRenderComposite(dpy, PictOpSrc, cells_pict, None, buffer_pict, 0, 0, 0, 0, 0, 0, dw, dh);
+	} else
+		XRenderComposite(dpy, PictOpSrc, base, None, buffer_pict, 0, 0, 0, 0, 0, 0, dw, dh);
+	/* the icons, crisp over it */
+	if (wp_pict && icon_mask)
+		XRenderComposite(dpy, PictOpOver, bg_pict, icon_mask, buffer_pict, 0, 0, 0, 0, 0, 0, dw, dh);
 }
 
 static int paint(void)
@@ -823,16 +1312,27 @@ static int paint(void)
 		XserverRegion inter;
 		int n = 0;
 		XRectangle *rects;
-		if (!w->acrylic || !w->mapped) continue;
+		if ((!w->acrylic && !glass_frame(w)) || !w->mapped) continue;
 		inter = XFixesCreateRegion(dpy, &r, 1);
 		XFixesIntersectRegion(dpy, inter, inter, damage_all);
+		if (!w->acrylic) {
+			/* a glass frame: only a change under the frame (not in the
+			 * client area, which is opaque) blurs it again */
+			XRectangle cr = { w->x + w->bw + w->frame[0], w->y + w->bw + w->frame[1],
+			                  w->w - w->frame[0] - w->frame[2], w->h - w->frame[1] - w->frame[3] };
+			XserverRegion client = XFixesCreateRegion(dpy, &cr, 1);
+			XFixesSubtractRegion(dpy, inter, inter, client);
+			XFixesDestroyRegion(dpy, client);
+		}
 		rects = XFixesFetchRegionAndBounds(dpy, inter, &n, &ext);
 		if (rects) XFree(rects);
 		XFixesDestroyRegion(dpy, inter);
 		if (n) damage_rect(r.x, r.y, r.width, r.height);
 	}
 	XFixesSetPictureClipRegion(dpy, buffer_pict, 0, 0, damage_all);
-	if (bg_pict)
+	if (bg_pict && opt_background != BG_STATIC)
+		draw_background();
+	else if (bg_pict)
 		XRenderComposite(dpy, PictOpSrc, bg_pict, None, buffer_pict, 0, 0, 0, 0, 0, 0, dw, dh);
 	else {
 		XRenderColor grey = { 0x2400, 0x6e00, 0x9400, 0xffff };
@@ -864,8 +1364,11 @@ static void dump(void)
 	if (!(f = fopen(tmp, "w"))) return;
 	fprintf(f, "desktop=0x%lx canvas=0x%lx size=%dx%d background=%d frames=%lu direct=0x%lx\n", desktop, canvas, dw, dh,
 	        bg_pict != 0, frames, direct);
-	fprintf(f, "settings shadows=%d shadow=%s animations=%d open=%s minimize=%s wobbly=%d moving=%d\n",
-	        opt_shadows, opt_shadow, opt_anim, opt_open, opt_minimize, opt_wobbly, opt_moving);
+	fprintf(f, "settings shadows=%d shadow=%s animations=%d open=%s minimize=%s wobbly=%d moving=%d glass=%d\n",
+	        opt_shadows, opt_shadow, opt_anim, opt_open, opt_minimize, opt_wobbly, opt_moving, opt_glass);
+	fprintf(f, "background=%s anim_frames=%lu battery=%d wallpaper=%d icons=%d light=%d,%d,%d sites=%d\n",
+	        opt_background == BG_LIGHT ? "light" : opt_background == BG_CELLS ? "cells" : "static", anim_frames, anim_battery,
+	        wp_pict != 0, icon_mask != 0, light_x, light_y, light_r, nsites);
 	for (int i = 0; i < nwins; i++) {
 		float m = 0;
 		char target[32] = "-";
@@ -875,10 +1378,10 @@ static void dump(void)
 			taskbar_target(&wins[i], &cx, &ty, &tw);
 			snprintf(target, sizeof(target), "%d,%d", (int)cx, (int)ty);
 		}
-		fprintf(f, "win 0x%lx %d,%d %dx%d mapped=%d managed=%d argb=%d kind=%d opacity=%lu anim=%d ghost=%d wobble=%.1f shadow=%d acrylic=%lu target=%s\n",
+		fprintf(f, "win 0x%lx %d,%d %dx%d mapped=%d managed=%d argb=%d kind=%d opacity=%lu anim=%d ghost=%d wobble=%.1f shadow=%d acrylic=%lu target=%s glass=%d\n",
 		        wins[i].id, wins[i].x, wins[i].y, wins[i].w, wins[i].h, wins[i].mapped, wins[i].managed, wins[i].argb,
 		        wins[i].kind, wins[i].opacity, wins[i].anim, wins[i].ghost, m, has_shadow(&wins[i]) && wins[i].mapped,
-		        wins[i].acrylic, target);
+		        wins[i].acrylic, target, glass_frame(&wins[i]) ? opt_glass : 0);
 	}
 	fclose(f);
 	rename(tmp, dump_path);
@@ -956,6 +1459,7 @@ static int attach(Window d)
 	if (trapped) { desktop = 0; return 0; }
 	setup_canvas();
 	load_background();
+	load_wallpaper();
 	if (XQueryTree(dpy, desktop, &root, &parent, &children, &n)) {
 		for (unsigned int i = 0; i < n; i++) add_window(children[i]);
 		if (children) XFree(children);
@@ -1087,6 +1591,8 @@ int main(int argc, char **argv)
 	atom_bgpixmap = XInternAtom(dpy, "_SG_DESKTOP_PIXMAP", False);
 	atom_acrylic = XInternAtom(dpy, "_SG_ACRYLIC", False);
 	atom_minrect = XInternAtom(dpy, "_SG_MINRECT", False);
+	atom_frame = XInternAtom(dpy, "_SG_FRAME", False);
+	atom_wppixmap = XInternAtom(dpy, "_SG_WALLPAPER_PIXMAP", False);
 	argb_format = XRenderFindStandardFormat(dpy, PictStandardARGB32);
 	a8_format = XRenderFindStandardFormat(dpy, PictStandardA8);
 	damage_all = XFixesCreateRegion(dpy, NULL, 0);
@@ -1145,6 +1651,7 @@ int main(int argc, char **argv)
 				if ((w = find(e.xmap.window))) {
 					w->mapped = 1;
 					w->kind = window_kind(w->id);
+					read_frame(w);
 					get_shape(w);
 					get_pictures(w);
 					if (want_open() && w->kind != KIND_PLAIN && w->x > OFFSCREEN) { w->anim = ANIM_OPEN; w->anim_start = now(); }
@@ -1176,21 +1683,35 @@ int main(int argc, char **argv)
 				else if ((w = find(e.xreparent.window))) { damage_win(w); forget(w); }
 				break;
 			case PropertyNotify:
-				if (e.xproperty.window == desktop && e.xproperty.atom == atom_bgpixmap) {
+				if (e.xproperty.window == desktop && (e.xproperty.atom == atom_bgpixmap || e.xproperty.atom == atom_wppixmap)) {
 					load_background();
+					load_wallpaper();
+					if (thumb) { XDestroyImage(thumb); thumb = NULL; }
 					damage_rect(0, 0, dw, dh);
 				} else if ((w = find(e.xproperty.window))) {
 					if (e.xproperty.atom == atom_opacity) w->opacity = prop_card(w->id, atom_opacity, XA_CARDINAL, 0xffffffff);
 					else if (e.xproperty.atom == atom_shadow) w->kind = window_kind(w->id);
 					else if (e.xproperty.atom == atom_acrylic) w->acrylic = prop_card(w->id, atom_acrylic, XA_CARDINAL, 0);
+					else if (e.xproperty.atom == atom_frame) read_frame(w);
 					damage_win(w);
 				}
 				break;
 			}
 		}
 		if (!desktop) continue;
-		read_settings();
+		{
+			int was = opt_background;
+			read_settings();
+			if (was != opt_background) {   /* another background: the wallpaper and icons again */
+				load_wallpaper();
+				if (thumb) { XDestroyImage(thumb); thumb = NULL; }
+				anim_next = 0;
+				light_box.width = 0;
+				damage_rect(0, 0, dw, dh);
+			}
+		}
 		check_direct();
+		animate(now());
 		if (direct) {
 			/* X draws the screen now: nothing to paint, nothing owed */
 			XFixesSetRegion(dpy, damage_all, NULL, 0);
@@ -1206,7 +1727,13 @@ int main(int argc, char **argv)
 		if (!XPending(dpy)) {
 			int wobbling = 0;
 			for (int i = 0; i < nwins; i++) wobbling |= wins[i].wobbling;
-			poll(&pfd, 1, !busy ? 1000 : wobbling ? 33 : 16);   /* a wobble at 30 frames a second is enough */
+			int wait = !busy ? 1000 : wobbling ? 33 : 16;   /* a wobble at 30 frames a second is enough */
+			if (anim_next) {   /* the animated background's next frame */
+				int due = (int)((anim_next - now()) * 1000) + 1;
+				if (due < 1) due = 1;
+				if (due < wait) wait = due;
+			}
+			poll(&pfd, 1, wait);
 		}
 	}
 	/* hand the windows back to X */

@@ -4,7 +4,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define DECOR_TITLE_H 32
+/* the title bar's height: the Wine frames' (Settings' effects.conf), else 32 */
+int decor_title_h(void);
 
 struct cg_seat;
 struct cg_server;

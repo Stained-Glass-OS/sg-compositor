@@ -898,8 +898,8 @@ handle_session_request_maximize(struct wl_listener *listener, void *data)
 	view_get_layout_box(view, &box);
 	box.height -= DECOR_TASKBAR_H;
 	if (decor_has(view)) {
-		box.y += DECOR_TITLE_H;
-		box.height -= DECOR_TITLE_H;
+		box.y += decor_title_h();
+		box.height -= decor_title_h();
 	}
 	if (want) {
 		view->restore = (struct wlr_box){view->lx, view->ly, xs->width, xs->height};

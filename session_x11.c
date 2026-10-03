@@ -20,6 +20,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <time.h>
 #include <wlr/types/wlr_scene.h>
 #include <wlr/xwayland.h>
 #include <xcb/xcb.h>
@@ -80,12 +81,114 @@ copy_clean(char *out, size_t len, const char *in)
 	out[i] = 0;
 }
 
+static uint64_t
+now_ms(void)
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (uint64_t) ts.tv_sec * 1000 + (uint64_t) ts.tv_nsec / 1000000;
+}
+
+/* when the taskbar last asked for the list: it frames the windows it lists
+ * (wine-sg 0762) while it asks */
+static uint64_t last_list_ms;
+
+/* A Linux program's window the taskbar is about to put into a Wine frame is
+ * not shown until then: it was shown with our title bar for a second or two
+ * first, then in the frame (David 2026-10-02: the terminal "starts with one
+ * window decorator, then changes a bit later to look like the others").
+ * Framed, it is unmapped here; not framed by then (a window the taskbar
+ * cannot frame, a taskbar not running), it is shown. */
+#define HOLD_MS 2500
+struct hold {
+	struct wl_list link;
+	struct cg_view *view;
+	struct wl_event_source *timer;
+};
+static struct wl_list holds = {&holds, &holds};
+
+static void
+end_hold(struct hold *h, bool show)
+{
+	struct cg_view *view = h->view;
+	wl_list_remove(&h->link);
+	wl_event_source_remove(h->timer);
+	free(h);
+	if (show && view->scene_tree) {
+		wlr_scene_node_set_enabled(&view->scene_tree->node,
+					   !view->minimized && lock_view_allowed(&view->server->lock, view));
+	}
+}
+
+static int
+hold_expired(void *data)
+{
+	end_hold(data, true);
+	return 0;
+}
+
+void
+session_x11_hold(struct cg_view *view)
+{
+	struct hold *h;
+	struct cg_server *server = view->server;
+
+#ifdef SG_MUTANT_NO_HOLD
+	return;
+#endif
+	if (!program_surface(view) || !view->scene_tree || !last_list_ms || now_ms() - last_list_ms > 3000) {
+		return;   /* no taskbar framing windows now */
+	}
+	wl_list_for_each (h, &holds, link) {
+		if (h->view == view) {
+			return;
+		}
+	}
+	if (!(h = calloc(1, sizeof(*h)))) {
+		return;
+	}
+	h->view = view;
+	h->timer = wl_event_loop_add_timer(wl_display_get_event_loop(server->wl_display), hold_expired, h);
+	if (!h->timer) {
+		free(h);
+		return;
+	}
+	wl_event_source_timer_update(h->timer, HOLD_MS);
+	wl_list_insert(&holds, &h->link);
+	wlr_scene_node_set_enabled(&view->scene_tree->node, false);
+}
+
+void
+session_x11_unhold(struct cg_view *view)
+{
+	struct hold *h, *tmp;
+	wl_list_for_each_safe (h, tmp, &holds, link) {
+		if (h->view == view) {
+			end_hold(h, false);
+		}
+	}
+}
+
+bool
+session_x11_held(struct cg_view *view)
+{
+	struct hold *h;
+	wl_list_for_each (h, &holds, link) {
+		if (h->view == view) {
+			return true;
+		}
+	}
+	return false;
+}
+
 size_t
 session_x11_list(struct cg_server *server, char *buf, size_t len)
 {
 	struct cg_view *view, *focus = seat_get_focus(server->seat);
 	struct wlr_xwayland_surface *xs;
 	size_t off = 0;
+
+	last_list_ms = now_ms();
 
 	wl_list_for_each (view, &server->views, link) {
 		char title[120], class[48];
@@ -244,4 +347,7 @@ bool session_x11_super(struct cg_server *server, struct cg_view *focus) { (void)
 bool session_x11_minimize(struct cg_server *server, unsigned long window) { (void) server; (void) window; return false; }
 bool session_x11_close(struct cg_server *server, unsigned long window) { (void) server; (void) window; return false; }
 bool session_x11_desktop_front(struct cg_server *server) { (void) server; return false; }
+void session_x11_hold(struct cg_view *view) { (void) view; }
+void session_x11_unhold(struct cg_view *view) { (void) view; }
+bool session_x11_held(struct cg_view *view) { (void) view; return false; }
 #endif

@@ -1,3 +1,29 @@
+sg-compositor (0.2.0+sg27) unstable; urgency=medium
+
+  * The Glass look's window frames are glass, as the Glass taskbar is
+    (David 2026-10-02): sg-deskcomp lays a window's frame (wine-sg 0801's
+    _SG_FRAME) see-through over a blur of what is below it, its client
+    area opaque, when Settings writes glass=N (the Glass look with
+    Transparency effects on). Test: test/glassframe-gate.sh (mutant
+    SOLID_FRAMES).
+  * An animated background, off by default (Settings > Personalization >
+    Background): "light", a light drifting behind the picture and shining
+    through it; "cells", the picture as stained-glass cells that drift and
+    gather round the open windows. Under crisp icons (wine-sg 0804), only
+    where it changes and not under windows, none while a full-screen
+    program is on top or on battery saver (on battery at 20 % or less).
+    Test: test/animbg-gate.sh (mutants STATIC_BACKGROUND, NO_BATTERY_SAVER).
+  * A Linux program's title bar is the Wine frames' own: their look
+    (Classic, Rounded, Horizon, Glass) and sizes, from Settings'
+    effects.conf (David: "Linux apps seem to get smaller window
+    decorations"); and while the taskbar frames Linux windows, a new one is
+    held back until it is framed (or 2.5 s), so it is not seen with our
+    title bar first (David: the terminal "starts with one window
+    decorator, then changes"). Test: test/decorlook-gate.sh (mutants
+    NO_HOLD, DECOR_OWN_SIZE).
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Sat, 03 Oct 2026 00:30:00 +0000
+
 sg-compositor (0.2.0+sg26) unstable; urgency=medium
 
   * A Linux program's title bar follows dark mode (the user's GTK setting,
