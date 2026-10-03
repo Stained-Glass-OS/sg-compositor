@@ -886,7 +886,7 @@ static int draw_window(struct win *w, double t)
  * (wine-sg 0804, _SG_WALLPAPER_PIXMAP), and they are the pixels where the
  * desktop's picture is not the wallpaper.
  * Cheap: the light at 8 frames a second, only where it is and not under
- * windows; the cells drawn at half size, a frame a second while they drift
+ * windows; the cells drawn at half size, a frame every 2 s while they drift
  * (12 while they move to the windows); nothing while a full-screen program
  * is on top (X draws it) or on battery below 20 % ("battery saver"), and half
  * as often on battery. */
@@ -1263,11 +1263,19 @@ static void animate(double t)
 		anim_next = t + (anim_battery ? 0.25 : 0.125);
 	} else {
 		XRectangle all = { 0, 0, dw, dh };
-		if (!thumb) make_thumb();
+		static int drawn;
+		if (!thumb) { make_thumb(); drawn = 0; }   /* a new picture: drawn again */
 		place_sites(1);
-		render_cells(t);
-		damage_uncovered(&all);
-		anim_next = t + (cells_move_until > t ? 1.0 / 12 : anim_battery ? 2.0 : 1.0);
+		if (!drawn || !anim_battery || cells_move_until > t) {
+			render_cells(t);
+			damage_uncovered(&all);
+			drawn = 1;
+		}
+		/* moving to the windows: 12 a second; drifting: every 2 s (each
+		 * frame is some tens of ms at 1080 p); on battery, only moving */
+		if (cells_move_until > t) anim_next = t + 1.0 / 12;
+		else if (anim_battery) anim_next = t + 0.5;   /* (looks again for a change of windows; drawn only then) */
+		else anim_next = t + 2.0;
 	}
 	anim_frames++;
 }

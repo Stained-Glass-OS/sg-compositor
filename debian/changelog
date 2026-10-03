@@ -14,8 +14,8 @@ sg-compositor (0.2.0+sg27) unstable; urgency=medium
     program is on top or on battery saver (on battery at 20 % or less).
     Test: test/animbg-gate.sh (mutants STATIC_BACKGROUND, NO_BATTERY_SAVER).
     The cells take the brightest colour about them (not the picture's own
-    lead lines: black cells) and drift at a frame a second (about 3 % of a
-    core at 1080 p).
+    lead lines: black cells) and drift a frame every 2 s (about 3 % of a
+    core at 1080 p), on battery only as the windows change.
   * A Linux program's title bar is the Wine frames' own: their look
     (Classic, Rounded, Horizon, Glass) and sizes, from Settings'
     effects.conf (David: "Linux apps seem to get smaller window
