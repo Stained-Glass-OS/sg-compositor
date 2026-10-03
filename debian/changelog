@@ -1,3 +1,19 @@
+sg-compositor (0.2.0+sg29) unstable; urgency=medium
+
+  * sg-deskcomp, the moving backgrounds reworked (David 2026-10-03):
+    - light: shines through the picture where the pointer is (it drifted on
+      its own and mostly darkened the picture); follows the pointer at 30
+      frames a second, nothing while it rests.
+    - Living glass: each window is outlined by a lead line straight along
+      its edges and a border of smaller polygon cells that goes with it;
+      nothing moves on its own (it redrew everything at a frame every 2 s);
+      while a window moves, only the part about it is drawn again, at 30
+      frames a second, at full size (was half, blurred).
+    Gate: test/animbg-gate.sh reworked (mutants STATIC_BACKGROUND,
+    NO_BATTERY_SAVER, CELLS_EVERY_FRAME); deskcomp-probe glide.
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Sat, 03 Oct 2026 04:10:00 +0000
+
 sg-compositor (0.2.0+sg28) unstable; urgency=medium
 
   * XKILL <window> on the control socket: Task Manager's End task on a Linux

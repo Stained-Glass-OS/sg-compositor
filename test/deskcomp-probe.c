@@ -3,6 +3,8 @@
  *   deskcomp-probe layered X Y ALPHA     a red layered popup, 200x150, ALPHA/255 opaque
  *   deskcomp-probe argb X Y              a popup with per-pixel alpha: blue, a quarter opaque
  *   deskcomp-probe minimize TITLE        minimize that window, and exit
+ *   deskcomp-probe glide TITLE X Y MS    move that window to X,Y in steps over MS ms
+ *                                        (as dragged), and exit
  *   deskcomp-probe frosted X Y           a red popup, 200x150, frosted at 50% (__wine_sg_acrylic, wine-sg 0745)
  *   deskcomp-probe full                  a white popup over the whole screen, on top
  *   deskcomp-probe shrink                a magenta one over the whole screen that, after
@@ -49,6 +51,21 @@ int wmain(int argc, WCHAR **argv)
         HWND w = FindWindowW(L"deskcomp", argv[2]);
         if (w) PostMessageW(w, WM_SYSCOMMAND, SC_MINIMIZE, 0);
         return w ? 0 : 1;
+    }
+    if (argc >= 6 && !lstrcmpW(argv[1], L"glide"))
+    {
+        HWND w = FindWindowW(L"deskcomp", argv[2]);
+        RECT r;
+        int i, steps, x1 = _wtoi(argv[3]), y1 = _wtoi(argv[4]), ms = _wtoi(argv[5]);
+        if (!w || !GetWindowRect(w, &r)) return 1;
+        steps = ms / 16 > 0 ? ms / 16 : 1;
+        for (i = 1; i <= steps; i++)
+        {
+            SetWindowPos(w, 0, r.left + (x1 - r.left) * i / steps, r.top + (y1 - r.top) * i / steps, 0, 0,
+                         SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+            Sleep(16);
+        }
+        return 0;
     }
     if (argc >= 2 && !lstrcmpW(argv[1], L"full"))
         h = CreateWindowExW(WS_EX_TOPMOST, L"deskcomp", L"full", WS_POPUP | WS_VISIBLE, 0, 0,

@@ -875,21 +875,21 @@ static int draw_window(struct win *w, double t)
  * Settings > Personalization > Background > Animated background (David
  * 2026-10-02: "an active background instead of the single wallpaper"), off
  * by default:
- *   light  a soft light drifts behind the picture and shines through it --
- *          the picture dimmed, and brightened again in its own colours where
- *          the light is (the picture added through the light's round falloff);
- *   cells  the picture as stained glass: cells of its colours with dark lead
- *          lines between them, the cells drifting slowly, and gathering round
- *          the open windows -- a ring of cells along each window's edges, so
- *          the lead lines run round it, moving to it as it opens and moves.
+ *   light  light shines through the picture where the pointer is: its own
+ *          colours brighter there, the rest a shade quieter (David
+ *          2026-10-03: "the light is near the mouse");
+ *   cells  the picture as stained glass: cells of its colours with lead
+ *          between them; each open window outlined by a lead line straight
+ *          along its edges and a border of smaller cells, which go with it
+ *          as it moves (below, "the cells").
  * The icons stay crisp over it: explorer sends the picture without them too
  * (wine-sg 0804, _SG_WALLPAPER_PIXMAP), and they are the pixels where the
  * desktop's picture is not the wallpaper.
- * Cheap: the light at 8 frames a second, only where it is and not under
- * windows; the cells drawn at half size, a frame every 2 s while they drift
- * (12 while they move to the windows); nothing while a full-screen program
- * is on top (X draws it) or on battery below 20 % ("battery saver"), and half
- * as often on battery. */
+ * Cheap: nothing moves on its own. The light follows the pointer at 30
+ * frames a second while it moves, only where it is and not under windows;
+ * the cells are drawn again only about a window that came, went or moved,
+ * at 30 a second at most; nothing while a full-screen program is on top (X
+ * draws it) or on battery below 20 % ("battery saver"). */
 static Picture wp_pict, icon_mask, cells_pict;
 static Pixmap cells_pixmap;
 static int cells_w, cells_h;
@@ -1024,21 +1024,36 @@ static int damage_uncovered(XRectangle *box)
 	return n;
 }
 
-/* the light's place at time t: a slow figure across the screen */
-static void light_at(double t, int *x, int *y, int *r)
+/* where the light is: the pointer, over the desktop (David 2026-10-03:
+ * "the light is near the mouse") */
+static int pointer_at(int *x, int *y)
 {
-	*r = (dh > dw ? dw : dh) * 4 / 10;
-	*x = (int)(dw * (0.5 + 0.40 * sin(t * 0.061)));
-	*y = (int)(dh * (0.5 + 0.32 * sin(t * 0.043 + 1.3)));
+	Window root, child;
+	int rx, ry;
+	unsigned int mask;
+	return desktop && XQueryPointer(dpy, desktop, &root, &child, &rx, &ry, x, y, &mask);
 }
 
-/* ---- the cells ---- */
-#define MAX_SITES 1400
-struct site { float x, y, tx, ty, ph; uint32_t color; };
-static struct site sites[MAX_SITES];
-static int nsites, nbase;
-static double cells_move_until;
-static unsigned long layout_sig;
+/* ---- the cells ----
+ * The picture as stained glass: cells of its colours with dark lead between
+ * them. Each window (its frame, and a few pixels round it) is a pane of its
+ * own: the cells about it take only sites outside it, so they are cut off
+ * straight along its edges -- a lead line round it -- and smaller cells, on
+ * sites just outside its sides, make the border of polygons that outline it
+ * (David 2026-10-03: "stained glass forming a square where the square is
+ * the window"). Nothing moves on its own; as a window moves its border of
+ * cells goes with it, and only the part about it is drawn again. */
+#define MAX_SITES 2000
+#define MAX_PANES 64
+#define PANE_GAP 3
+struct site { float x, y; uint32_t color; };
+static struct site base_sites[MAX_SITES], sites[MAX_SITES];
+static int nbase, nsites, spacing;
+struct pane { unsigned long id; int x0, y0, x1, y1; };   /* x1, y1: past the end */
+static struct pane panes[MAX_PANES], drawn_panes[MAX_PANES];
+static int npanes, ndrawn_panes, cells_drawn;
+static uint32_t *cells_data;
+static double cells_last;
 
 static uint32_t hash32(uint32_t v) { v ^= v >> 16; v *= 0x7feb352d; v ^= v >> 15; v *= 0x846ca68b; v ^= v >> 16; return v; }
 
@@ -1083,168 +1098,221 @@ static uint32_t thumb_color(float x, float y)
 	return c;
 }
 
-/* the cells' sites: a jittered grid, and rings round the windows */
-static void place_sites(int moving)
+/* the windows the cells keep out of, and whether they changed */
+static int find_panes(void)
 {
-	int spacing = (dh > dw ? dw : dh) / 9, n = 0;
-	unsigned long sig = 0;
+	int n = 0, changed;
+	for (int i = 0; i < nwins && n < MAX_PANES; i++) {
+		struct win *w = &wins[i];
+		if (!w->mapped || w->ghost || w->kind != KIND_FRAMED || w->x <= OFFSCREEN) continue;
+		panes[n].id = w->id;
+		panes[n].x0 = w->x - PANE_GAP; panes[n].y0 = w->y - PANE_GAP;
+		panes[n].x1 = w->x + w->w + 2 * w->bw + PANE_GAP; panes[n].y1 = w->y + w->h + 2 * w->bw + PANE_GAP;
+		n++;
+	}
+	changed = n != npanes || memcmp(panes, drawn_panes, sizeof(struct pane) * n);
+	npanes = n;
+	return changed;
+}
+
+static int in_pane(float x, float y, int margin)
+{
+	for (int i = 0; i < npanes; i++)
+		if (x >= panes[i].x0 - margin && x < panes[i].x1 + margin && y >= panes[i].y0 - margin && y < panes[i].y1 + margin)
+			return 1;
+	return 0;
+}
+
+/* the sites: a jittered grid, less what is in or next to a window; and a
+ * border of smaller cells' sites just outside each window's sides, placed
+ * from the window (so they move with it), varied so the cells differ */
+static void place_sites(void)
+{
+	int n = 0;
+	spacing = (dh > dw ? dw : dh) / 9;
 	if (spacing < 40) spacing = 40;
 	if (!nbase) {
-		for (int gy = 0; gy * spacing < dh + spacing && n < MAX_SITES / 2; gy++)
-			for (int gx = 0; gx * spacing < dw + spacing && n < MAX_SITES / 2; gx++) {
+		for (int gy = 0; gy * spacing < dh + spacing && nbase < MAX_SITES / 2; gy++)
+			for (int gx = 0; gx * spacing < dw + spacing && nbase < MAX_SITES / 2; gx++) {
 				uint32_t h = hash32(gx * 7919 + gy * 104729 + 17);
-				sites[n].x = sites[n].tx = gx * spacing + (float)(h % spacing) - spacing / 2.0f;
-				sites[n].y = sites[n].ty = gy * spacing + (float)((h >> 12) % spacing) - spacing / 2.0f;
-				sites[n].ph = (float)(h % 628) / 100.0f;
-				n++;
+				base_sites[nbase].x = gx * spacing + (float)(h % spacing) - spacing / 2.0f;
+				base_sites[nbase].y = gy * spacing + (float)((h >> 12) % spacing) - spacing / 2.0f;
+				base_sites[nbase].color = 0;
+				nbase++;
 			}
-		nbase = nsites = n;
 	}
-	n = nbase;
-	for (int i = 0; i < nwins && n < MAX_SITES; i++) {
-		struct win *w = &wins[i];
-		int x0, y0, x1, y1, ring = spacing / 4 + 6, step = spacing / 2;
-		if (!w->mapped || w->ghost || w->kind != KIND_FRAMED || w->x <= OFFSCREEN) continue;
-		x0 = w->x - ring; y0 = w->y - ring; x1 = w->x + w->w + 2 * w->bw + ring; y1 = w->y + w->h + 2 * w->bw + ring;
-		sig = sig * 31 + (unsigned long)(x0 * 3 + y0 * 7 + x1 * 11 + y1 * 13);
-		/* along the four sides, outside the window: the lead lines between
-		 * these and the sites inside run round it */
-		for (int x = x0; x <= x1 && n + 4 < MAX_SITES; x += step) {
-			sites[n].tx = x; sites[n].ty = y0; n++;
-			sites[n].tx = x; sites[n].ty = y1; n++;
-			sites[n].tx = x; sites[n].ty = y0 + 2 * ring; n++;
-			sites[n].tx = x; sites[n].ty = y1 - 2 * ring; n++;
-		}
-		for (int y = y0 + step; y < y1 && n + 4 < MAX_SITES; y += step) {
-			sites[n].tx = x0; sites[n].ty = y; n++;
-			sites[n].tx = x1; sites[n].ty = y; n++;
-			sites[n].tx = x0 + 2 * ring; sites[n].ty = y; n++;
-			sites[n].tx = x1 - 2 * ring; sites[n].ty = y; n++;
-		}
-	}
-	for (int i = nbase; i < n; i++) {
-		if (i >= nsites) {   /* new: from the nearest window edge's middle */
-			sites[i].x = sites[i].tx; sites[i].y = sites[i].ty;
-			sites[i].ph = (float)(hash32(i) % 628) / 100.0f;
+	for (int i = 0; i < nbase && n < MAX_SITES; i++)
+		if (!in_pane(base_sites[i].x, base_sites[i].y, spacing * 2 / 3))
+			sites[n++] = base_sites[i];
+	for (int p = 0; p < npanes; p++) {
+		struct pane *q = &panes[p];
+		int step = spacing * 9 / 20, k = 0;
+		/* along each side, outside it: at a depth of a third to a half of
+		 * the grid's spacing, a step apart, each a little off its place */
+		for (int side = 0; side < 4; side++) {
+			int len = side < 2 ? q->x1 - q->x0 : q->y1 - q->y0, m = len / step + 1;
+			for (int j = 0; j <= m && n < MAX_SITES; j++, k++) {
+				uint32_t h = hash32((uint32_t)k * 2654435761u + 7);
+				float along = (float)j * len / m + ((int)(h % (step / 2 + 1)) - step / 4);
+				float depth = spacing / 3.0f + (float)((h >> 10) % (spacing / 6 + 1));
+				float x, y;
+				if (side == 0) { x = q->x0 + along; y = q->y0 - depth; }
+				else if (side == 1) { x = q->x0 + along; y = q->y1 + depth; }
+				else if (side == 2) { x = q->x0 - depth; y = q->y0 + along; }
+				else { x = q->x1 + depth; y = q->y0 + along; }
+				if (in_pane(x, y, 2)) continue;
+				sites[n].x = x; sites[n].y = y; sites[n].color = 0; n++;
+			}
 		}
 	}
 	nsites = n;
-	if (sig != layout_sig) {
-		layout_sig = sig;
-		if (moving) cells_move_until = now() + 0.9;
-	}
-	for (int i = 0; i < nsites; i++) sites[i].color = thumb_color(sites[i].tx, sites[i].ty);
+	for (int i = 0; i < nsites; i++) sites[i].color = thumb_color(sites[i].x, sites[i].y);
 }
 
-/* the cells, at half size: each pixel its nearest site's colour, shaded
- * towards its edges, with dark lead lines between them */
-static void render_cells(double t)
+/* a site's square of the grid the search goes by */
+static int grid_cell(int i, int bs, int gw, int gh)
 {
-	int w = dw / 2 + 1, h = dh / 2 + 1, bs = 48, bw = w / bs + 1, bh = h / bs + 1;
-	static int *bucket_start, *bucket_items, nb;
-	float px[MAX_SITES], py[MAX_SITES];
-	uint32_t *data;
-	XImage *img;
-	GC gc;
+	int cx = (int)sites[i].x / bs, cy = (int)sites[i].y / bs;
+	if (cx < 0) cx = 0;
+	if (cy < 0) cy = 0;
+	if (cx >= gw) cx = gw - 1;
+	if (cy >= gh) cy = gh - 1;
+	return cy * gw + cx;
+}
 
-	if (!cells_pixmap || cells_w != w || cells_h != h) {
-		if (cells_pict) XRenderFreePicture(dpy, cells_pict);
-		if (cells_pixmap) XFreePixmap(dpy, cells_pixmap);
-		cells_pixmap = XCreatePixmap(dpy, desktop, w, h, depth);
-		cells_pict = XRenderCreatePicture(dpy, cells_pixmap, format, 0, NULL);
-		XRenderSetPictureFilter(dpy, cells_pict, "bilinear", NULL, 0);
-		set_transform(cells_pict, 0.5, 0, 0, 0, 0.5, 0);
-		cells_w = w; cells_h = h;
-	}
-	/* where each site is now: drifting about its place, moving to its target */
-	for (int i = 0; i < nsites; i++) {
-		float k = cells_move_until > t ? 0.22f : 1.0f;
-		sites[i].x += (sites[i].tx - sites[i].x) * k;
-		sites[i].y += (sites[i].ty - sites[i].y) * k;
-		px[i] = (sites[i].x + 9.0f * sinf((float)t * 0.31f + sites[i].ph)) / 2;
-		py[i] = (sites[i].y + 9.0f * cosf((float)t * 0.27f + sites[i].ph * 1.7f)) / 2;
-	}
-	/* sites into buckets */
-	if (nb != bw * bh) {
-		free(bucket_start);
-		bucket_start = calloc(bw * bh + 1, sizeof(int));
-		nb = bw * bh;
-	}
-	free(bucket_items);
-	bucket_items = malloc(sizeof(int) * (nsites + 1));
-	if (!bucket_start || !bucket_items) return;
-	memset(bucket_start, 0, sizeof(int) * (nb + 1));
-	for (int i = 0; i < nsites; i++) {
-		int bx = (int)px[i] / bs, by = (int)py[i] / bs;
-		if (bx < 0) bx = 0;
-		if (by < 0) by = 0;
-		if (bx >= bw) bx = bw - 1;
-		if (by >= bh) by = bh - 1;
-		bucket_start[by * bw + bx + 1]++;
-	}
-	for (int b = 0; b < nb; b++) bucket_start[b + 1] += bucket_start[b];
-	{
-		int *fillp = calloc(nb, sizeof(int));
-		if (!fillp) return;
-		for (int i = 0; i < nsites; i++) {
-			int bx = (int)px[i] / bs, by = (int)py[i] / bs;
-			if (bx < 0) bx = 0;
-			if (by < 0) by = 0;
-			if (bx >= bw) bx = bw - 1;
-			if (by >= bh) by = bh - 1;
-			bucket_items[bucket_start[by * bw + bx] + fillp[by * bw + bx]++] = i;
-		}
-		free(fillp);
-	}
-	data = malloc((size_t)w * h * 4);
-	if (!data) return;
-	for (int y = 0; y < h; y++) {
-		int by = y / bs;
-		for (int x = 0; x < w; x++) {
-			int bx = x / bs, best = 0, second = 0, r;
+/* the cells in a box of the screen into cells_data: each pixel its nearest
+ * site's colour, shaded toward its edges, the lead between them drawn
+ * smooth; in or at a window, lead (its border) */
+static void render_cells_box(int bx0, int by0, int bx1, int by1)
+{
+	int bs = spacing, gw = dw / bs + 1, gh = dh / bs + 1;
+	int *start, *items, *fill;
+
+	if (bx0 < 0) bx0 = 0;
+	if (by0 < 0) by0 = 0;
+	if (bx1 > dw) bx1 = dw;
+	if (by1 > dh) by1 = dh;
+	if (bx0 >= bx1 || by0 >= by1) return;
+	start = calloc((size_t)gw * gh + 1, sizeof(int));
+	items = malloc(sizeof(int) * (nsites + 1));
+	fill = calloc((size_t)gw * gh, sizeof(int));
+	if (!start || !items || !fill) { free(start); free(items); free(fill); return; }
+	for (int i = 0; i < nsites; i++) start[grid_cell(i, bs, gw, gh) + 1]++;
+	for (int c = 0; c < gw * gh; c++) start[c + 1] += start[c];
+	for (int i = 0; i < nsites; i++) { int c = grid_cell(i, bs, gw, gh); items[start[c] + fill[c]++] = i; }
+	free(fill);
+	for (int y = by0; y < by1; y++) {
+		int cy = y / bs;
+		for (int x = bx0; x < bx1; x++) {
+			int cx = x / bs, best = -1, second = -1, inside = 0;
 			float d1 = 1e18f, d2 = 1e18f;
-			for (r = 1; r <= 2; r++) {
-				for (int yy = by - r; yy <= by + r; yy++) {
-					if (yy < 0 || yy >= bh) continue;
-					for (int xx = bx - r; xx <= bx + r; xx++) {
-						if (xx < 0 || xx >= bw || (r == 2 && yy > by - 2 && yy < by + 2 && xx > bx - 2 && xx < bx + 2)) continue;
-						for (int k = bucket_start[yy * bw + xx]; k < bucket_start[yy * bw + xx + 1]; k++) {
-							int i = bucket_items[k];
-							float dx = px[i] - x, dy = py[i] - y, d = dx * dx + dy * dy;
+			uint32_t *out = &cells_data[(size_t)y * dw + x];
+			for (int p = 0; p < npanes; p++)
+				if (x >= panes[p].x0 && x < panes[p].x1 && y >= panes[p].y0 && y < panes[p].y1) { inside = 1; break; }
+			if (inside) { *out = 0x221e28; continue; }   /* the window's border of lead (under it, mostly) */
+			for (int r = 1; r <= 3; r++) {
+				for (int yy = cy - r; yy <= cy + r; yy++) {
+					if (yy < 0 || yy >= gh) continue;
+					for (int xx = cx - r; xx <= cx + r; xx++) {
+						if (xx < 0 || xx >= gw) continue;
+						if (r > 1 && yy > cy - r && yy < cy + r && xx > cx - r && xx < cx + r) continue;
+						for (int k = start[yy * gw + xx]; k < start[yy * gw + xx + 1]; k++) {
+							int i = items[k];
+							float dx = sites[i].x - x, dy = sites[i].y - y, d = dx * dx + dy * dy;
 							if (d < d1) { d2 = d1; second = best; d1 = d; best = i; }
 							else if (d < d2) { d2 = d; second = i; }
 						}
 					}
 				}
-				if (d2 < (float)(r * bs) * (r * bs)) break;   /* the ring searched holds the two nearest */
+				if (second >= 0 && d2 < (float)(r * bs) * (r * bs)) break;
 			}
+			if (best < 0) { *out = 0x221e28; continue; }
 			{
-				float sx = px[second] - px[best], sy = py[second] - py[best], sep = sqrtf(sx * sx + sy * sy);
-				float edge = sep > 0 ? (d2 - d1) / (2 * sep) : 99;   /* distance to the cells' border */
-				uint32_t c = sites[best].color, out;
+				float edge = 99, lead, shade;
+				uint32_t c = sites[best].color;
 				int rr = (c >> 16) & 0xff, gg = (c >> 8) & 0xff, bb = c & 0xff;
-				if (edge < 1.3f) { rr = 34; gg = 30; bb = 40; }          /* the lead */
-				else {
-					/* glass: lit in the middle, darker toward the lead */
-					float shade = edge > 14 ? 1.12f : 0.82f + edge * 0.0215f;
-					rr = (int)(rr * shade); gg = (int)(gg * shade); bb = (int)(bb * shade);
-					if (rr > 255) rr = 255;
-					if (gg > 255) gg = 255;
-					if (bb > 255) bb = 255;
+				if (second >= 0) {
+					float sx = sites[second].x - sites[best].x, sy = sites[second].y - sites[best].y, sep = sqrtf(sx * sx + sy * sy);
+					if (sep > 0) edge = (d2 - d1) / (2 * sep);   /* the distance to the cells' border */
 				}
-				out = (uint32_t)rr << 16 | (uint32_t)gg << 8 | (uint32_t)bb;
-				data[(size_t)y * w + x] = out;
+				/* and to a window's edge: the lead runs straight along it */
+				for (int p = 0; p < npanes; p++) {
+					float ex = x < panes[p].x0 ? panes[p].x0 - x : x >= panes[p].x1 ? x - panes[p].x1 + 1 : 0;
+					float ey = y < panes[p].y0 ? panes[p].y0 - y : y >= panes[p].y1 ? y - panes[p].y1 + 1 : 0;
+					float e = ex > ey ? ex : ey;
+					if (ex > 0 && ey > 0) e = sqrtf(ex * ex + ey * ey);
+					if (e < edge) edge = e;
+				}
+				/* glass: lit in the middle, darker toward the lead */
+				shade = edge > 18 ? 1.10f : 0.80f + edge * (0.30f / 18);
+				rr = (int)(rr * shade); gg = (int)(gg * shade); bb = (int)(bb * shade);
+				if (rr > 255) rr = 255;
+				if (gg > 255) gg = 255;
+				if (bb > 255) bb = 255;
+				/* the lead, two pixels wide, its edges smooth */
+				lead = edge < 1.0f ? 1.0f : edge < 2.0f ? 2.0f - edge : 0.0f;
+				rr = (int)(rr + (0x22 - rr) * lead); gg = (int)(gg + (0x1e - gg) * lead); bb = (int)(bb + (0x28 - bb) * lead);
+				*out = (uint32_t)rr << 16 | (uint32_t)gg << 8 | (uint32_t)bb;
 			}
 		}
 	}
-	img = XCreateImage(dpy, visual, depth, ZPixmap, 0, (char *)data, w, h, 32, w * 4);
-	gc = XCreateGC(dpy, cells_pixmap, 0, NULL);
-	XPutImage(dpy, cells_pixmap, gc, img, 0, 0, 0, 0, w, h);
-	XFreeGC(dpy, gc);
-	XDestroyImage(img);   /* frees data */
+	free(start);
+	free(items);
+	{
+		XImage *img = XCreateImage(dpy, visual, depth, ZPixmap, 0, (char *)cells_data, dw, dh, 32, dw * 4);
+		GC gc = XCreateGC(dpy, cells_pixmap, 0, NULL);
+		XPutImage(dpy, cells_pixmap, gc, img, bx0, by0, bx0, by0, bx1 - bx0, by1 - by0);
+		XFreeGC(dpy, gc);
+		img->data = NULL;   /* cells_data is kept */
+		XDestroyImage(img);
+	}
+	{
+		XRectangle box = { bx0, by0, bx1 - bx0, by1 - by0 };
+		damage_uncovered(&box);
+	}
 }
 
-/* a frame of the animation is due: what changes is damaged */
+/* the cells again where the windows changed: about each one's old and new
+ * place (as far as a change of sites reaches), or all of them */
+static void render_cells(int all)
+{
+	int margin = spacing * 2;
+	if (!cells_pixmap || cells_w != dw || cells_h != dh || !cells_data) {
+		if (cells_pict) XRenderFreePicture(dpy, cells_pict);
+		if (cells_pixmap) XFreePixmap(dpy, cells_pixmap);
+		free(cells_data);
+		cells_data = calloc((size_t)dw * dh, 4);
+		cells_pixmap = XCreatePixmap(dpy, desktop, dw, dh, depth);
+		cells_pict = XRenderCreatePicture(dpy, cells_pixmap, format, 0, NULL);
+		cells_w = dw; cells_h = dh;
+		nbase = 0;   /* the grid for this size */
+		all = 1;
+	}
+	if (!cells_data) return;
+	place_sites();
+	if (all) render_cells_box(0, 0, dw, dh);
+	else {
+		/* each window that came, went or moved: its old and new places */
+		for (int pass = 0; pass < 2; pass++) {
+			struct pane *list = pass ? drawn_panes : panes;
+			int count = pass ? ndrawn_panes : npanes;
+			for (int i = 0; i < count; i++) {
+				struct pane *q = &list[i], *other = NULL;
+				struct pane *olist = pass ? panes : drawn_panes;
+				int ocount = pass ? npanes : ndrawn_panes;
+				for (int j = 0; j < ocount; j++) if (olist[j].id == q->id) { other = &olist[j]; break; }
+				if (other && !memcmp(other, q, sizeof(*q))) continue;   /* where it was */
+				render_cells_box(q->x0 - margin, q->y0 - margin, q->x1 + margin, q->y1 + margin);
+			}
+		}
+	}
+	memcpy(drawn_panes, panes, sizeof(struct pane) * npanes);
+	ndrawn_panes = npanes;
+	cells_drawn = 1;
+}
+
+/* a frame of the animation, when one is due: what changes is damaged.
+ * Nothing is due while nothing moves -- no processor time spent idle */
 static void animate(double t)
 {
 	if (opt_background == BG_STATIC || !bg_pict || direct) { anim_next = 0; return; }
@@ -1252,32 +1320,40 @@ static void animate(double t)
 	if (anim_battery == 2) { anim_next = 0; return; }   /* battery saver: still */
 	if (anim_next && t < anim_next) return;
 	if (opt_background == BG_LIGHT) {
-		int x, y, r;
-		XRectangle box;
-		light_at(t, &x, &y, &r);
-		box.x = x - r; box.y = y - r; box.width = 2 * r; box.height = 2 * r;
-		if (light_box.width) damage_uncovered(&light_box);
-		damage_uncovered(&box);
-		light_box = box;
-		light_x = x; light_y = y; light_r = r;
-		anim_next = t + (anim_battery ? 0.25 : 0.125);
-	} else {
-		XRectangle all = { 0, 0, dw, dh };
-		static int drawn;
-		if (!thumb) { make_thumb(); drawn = 0; }   /* a new picture: drawn again */
-		place_sites(1);
-		if (!drawn || !anim_battery || cells_move_until > t) {
-			render_cells(t);
-			damage_uncovered(&all);
-			drawn = 1;
+		int x, y, r = (dh > dw ? dw : dh) * 3 / 10;
+		static double still_since;
+		if (!pointer_at(&x, &y)) { anim_next = t + 0.5; return; }
+		if (x != light_x || y != light_y || r != light_r) {
+			XRectangle box = { x - r, y - r, 2 * r, 2 * r };
+			if (light_box.width) damage_uncovered(&light_box);
+			damage_uncovered(&box);
+			light_box = box;
+			light_x = x; light_y = y; light_r = r;
+			still_since = t;
+			anim_frames++;
 		}
-		/* moving to the windows: 12 a second; drifting: every 2 s (each
-		 * frame is some tens of ms at 1080 p); on battery, only moving */
-		if (cells_move_until > t) anim_next = t + 1.0 / 12;
-		else if (anim_battery) anim_next = t + 0.5;   /* (looks again for a change of windows; drawn only then) */
-		else anim_next = t + 2.0;
+		/* following the pointer at 30 a second while it moves; looking
+		 * for it 5 times a second once it rests */
+		anim_next = t + (t - still_since < 1.0 ? (anim_battery ? 1.0 / 15 : 1.0 / 30) : 0.2);
+	} else {
+		int changed;
+		if (!thumb) { make_thumb(); cells_drawn = 0; }   /* a new picture: drawn again */
+		changed = find_panes();
+#ifdef SG_MUTANT_CELLS_EVERY_FRAME
+		changed = 1; cells_drawn = 0;
+#endif
+		anim_next = 0;
+		if (!cells_drawn || changed) {
+			/* at most 30 frames a second while a window moves */
+			if (cells_drawn && t - cells_last < 1.0 / 30) { anim_next = cells_last + 1.0 / 30; return; }
+			render_cells(!cells_drawn);
+			cells_last = t;
+			anim_frames++;
+#ifdef SG_MUTANT_CELLS_EVERY_FRAME
+			anim_next = t + 0.5;
+#endif
+		}
 	}
-	anim_frames++;
 }
 
 /* the background, animated, under what was damaged (buffer_pict's clip) */
@@ -1289,18 +1365,23 @@ static void draw_background(void)
 	return;
 #endif
 	if (opt_background == BG_LIGHT) {
-		/* the picture dimmed, then added again through the light's falloff:
-		 * brighter in its own colours where the light is */
-		XRenderColor veil = { 0, 0, 0, 0x4800 };
+		/* the picture as it is, a shade quieter; where the pointer is, light
+		 * shines through it: its own colours added again through the
+		 * light's soft round falloff, and a little warm white */
+		XRenderColor veil = { 0, 0, 0, 0x1400 };
 		XRenderComposite(dpy, PictOpSrc, base, None, buffer_pict, 0, 0, 0, 0, 0, 0, dw, dh);
 		XRenderFillRectangle(dpy, PictOpOver, buffer_pict, &veil, 0, 0, dw, dh);
 		if (light_r > 0) {
 			XRadialGradient g = { { XDoubleToFixed(light_x), XDoubleToFixed(light_y), 0 },
 			                      { XDoubleToFixed(light_x), XDoubleToFixed(light_y), XDoubleToFixed(light_r) } };
-			XFixed stops[3] = { XDoubleToFixed(0), XDoubleToFixed(0.45), XDoubleToFixed(1) };
-			XRenderColor cols[3] = { { 0, 0, 0, 0xb000 }, { 0, 0, 0, 0x5000 }, { 0, 0, 0, 0 } };
+			XFixed stops[3] = { XDoubleToFixed(0), XDoubleToFixed(0.35), XDoubleToFixed(1) };
+			XRenderColor cols[3] = { { 0, 0, 0, 0xe000 }, { 0, 0, 0, 0x7000 }, { 0, 0, 0, 0 } };
+			XRenderColor warm = { 0x3000, 0x2a00, 0x1c00, 0xffff };
 			Picture light = XRenderCreateRadialGradient(dpy, &g, stops, cols, 3);
+			Picture glow = XRenderCreateSolidFill(dpy, &warm);
 			XRenderComposite(dpy, PictOpAdd, base, light, buffer_pict, 0, 0, 0, 0, 0, 0, dw, dh);
+			XRenderComposite(dpy, PictOpAdd, glow, light, buffer_pict, 0, 0, 0, 0, 0, 0, dw, dh);
+			XRenderFreePicture(dpy, glow);
 			XRenderFreePicture(dpy, light);
 		}
 	} else if (opt_background == BG_CELLS && cells_pict) {
