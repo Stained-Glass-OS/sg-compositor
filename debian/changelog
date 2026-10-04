@@ -1,3 +1,14 @@
+sg-compositor (0.2.0+sg34) unstable; urgency=medium
+
+  * A Linux program's window taken into Wine's frame for it leaves the
+    keyboard with the window now in front (David 2026-10-03: a Linux
+    Terminal opened over PowerShell got no keys until clicked). It had the
+    keyboard from its own map as a top-level; taken into the frame it
+    unmapped as one, and the keyboard stayed with a surface that was gone.
+    test/embedfocus-gate.sh (mutant SG_MUTANT_UNMAP_KEEPS_FOCUS).
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Sun, 04 Oct 2026 06:00:00 +0000
+
 sg-compositor (0.2.0+sg33) unstable; urgency=medium
 
   * Wobbly windows smooth (David 2026-10-03: "a little bit slow" on a

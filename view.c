@@ -209,6 +209,9 @@ view_position_all(struct cg_server *server)
 void
 view_unmap(struct cg_view *view)
 {
+	struct cg_server *server = view->server;
+	bool had_focus = view->wlr_surface && server->seat->seat->keyboard_state.focused_surface == view->wlr_surface;
+
 	wl_list_remove(&view->link);
 
 	if (view->server->seat->grab_view == view) {
@@ -218,6 +221,29 @@ view_unmap(struct cg_view *view)
 
 	view->wlr_surface->data = NULL;
 	view->wlr_surface = NULL;
+
+	/* sg-compositor: the keyboard goes on to the window now in front. A
+	   window that unmaps but lives on -- a Linux program's window taken
+	   into Wine's frame for it (wine-sg's embedding), which had the keyboard
+	   from its own map -- left it with a surface gone: no keys reached the
+	   program until a click (David 2026-10-03). view_destroy does this only
+	   when the window is destroyed. */
+	(void)had_focus;
+#ifndef SG_MUTANT_UNMAP_KEEPS_FOCUS
+	if (had_focus) {
+		struct cg_view *next;
+		wl_list_for_each (next, &server->views, link) {
+			bool unmanaged = false;
+#if CAGE_HAS_XWAYLAND
+			unmanaged = next->type == CAGE_XWAYLAND_VIEW && !xwayland_view_should_manage(next);
+#endif
+			if (!unmanaged && next->wlr_surface) {
+				seat_set_focus(server->seat, next);
+				break;
+			}
+		}
+	}
+#endif
 }
 
 void
