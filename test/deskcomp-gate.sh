@@ -117,6 +117,15 @@ cp "\$D" "$T/dump.back"; xwininfo -id \$(cat "$T/canvas.id") 2>/dev/null | grep 
 sleep 1.5; cp "\$D" "$T/dump.shrinkfull"; sleep 3
 import -window root "$T/shrunk.png"; cp "\$D" "$T/dump.shrunk"
 kill \$SP; sleep 1
+# what is below a frosted window moves by one pixel (a cursor blinking, text
+# typed): the frost barely changes -- it flickered, sampled not averaged
+"$WINE" deskcomp-probe.exe stripes 40 440 0 & S1=\$!
+sleep 1.5
+"$WINE" deskcomp-probe.exe frosted 60 460 & F2=\$!
+sleep 3; import -window root "$T/stripes0.png"
+"$WINE" deskcomp-probe.exe stripes 40 440 1 & S2=\$!
+sleep 1; kill \$S1; sleep 2.5; import -window root "$T/stripes1.png"
+kill \$S2 \$F2; sleep 1
 kill \$CP; sleep 1.5
 import -window root "$T/off.png"
 xwininfo -root -tree > "$T/tree.off"
@@ -145,6 +154,17 @@ grep -E 'win 0x[0-9a-f]+ 400,250 ' "$T/dump.on" | grep -q 'acrylic=50' && is on 
 db=$(( $(px on 497 330 | cut -d, -f3) - $(px on 503 330 | cut -d, -f3) ))
 [ "${db#-}" -lt 100 ] && pass "and what is below it is blurred (blue across the edge: $(px on 497 330) | $(px on 503 330))" \
     || fail "not blurred: $(px on 497 330) | $(px on 503 330)"
+
+# the frost over 4-px stripes moved by one pixel: nearly the same (an average)
+fd=0
+for p in "100 500" "140 520" "180 540" "220 560"; do
+    set -- $p
+    a=$(px stripes0 "$1" "$2"); b=$(px stripes1 "$1" "$2")
+    d=$(echo "$a $b" | awk -F'[ ,]' '{ d = 0; for (i = 1; i <= 3; i++) { x = $i - $(i + 3); if (x < 0) x = -x; if (x > d) d = x } print d }')
+    [ "$d" -gt "$fd" ] && fd=$d
+done
+[ -f "$T/stripes1.png" ] && [ "$fd" -lt 24 ] && pass "what is below a frosted window moves a pixel: the frost hardly changes (at most $fd)" \
+    || fail "the frost jumps when what is below moves a pixel (by up to $fd): $(px stripes0 140 520) -> $(px stripes1 140 520)"
 
 grep -E 'win 0x[0-9a-f]+ 600,480 ' "$T/dump.open" | grep -q 'anim=1' \
     && grep -E 'win 0x[0-9a-f]+ 600,480 ' "$T/dump.open" | tail -1 | grep -q 'anim=0' \

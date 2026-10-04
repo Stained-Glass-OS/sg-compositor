@@ -783,24 +783,51 @@ static void draw_shadow(struct win *w, double fade)
 
 /* what is below a frosted window, blurred: drawn an eighth of its size and
  * back (bilinear both ways), in place */
+/* What is below a frosted window, blurred: scaled down by 8 and back up.
+ * Down by halves, three times -- each half an exact average of 2 x 2 pixels
+ * -- so every pixel below counts: scaled down by 8 at once, bilinear read
+ * 2 of each 8 x 8 and the frost jumped when what is below moved a pixel (a
+ * cursor blinking under Start: it flickered, David 2026-10-04). */
 static void blur_below(int x, int y, int w, int h)
 {
 	int sw = w / 8 + 2, sh = h / 8 + 2;
-	Pixmap pm;
-	Picture small;
+	Pixmap pm[3];
+	Picture pic[3];
+	Picture src = buffer_pict;
+	int k, cw = w, ch = h, sx = x, sy = y;
 
 	if (w <= 0 || h <= 0) return;
-	pm = XCreatePixmap(dpy, desktop, sw, sh, depth);
-	small = XRenderCreatePicture(dpy, pm, format, 0, NULL);
+#ifndef SG_MUTANT_BLUR_SAMPLED
+	for (k = 0; k < 3; k++) {
+		int nw = (cw + 1) / 2 + 1, nh = (ch + 1) / 2 + 1;
+		pm[k] = XCreatePixmap(dpy, desktop, nw, nh, depth);
+		pic[k] = XRenderCreatePicture(dpy, pm[k], format, 0, NULL);
+		XRenderSetPictureFilter(dpy, src, "bilinear", NULL, 0);
+		/* a destination pixel's centre falls between 2 x 2 source pixels: their average */
+		set_transform(src, 2, 0, sx, 0, 2, sy);
+		XRenderComposite(dpy, PictOpSrc, src, None, pic[k], 0, 0, 0, 0, 0, 0, nw, nh);
+		reset_transform(src);
+		src = pic[k]; cw = nw; ch = nh; sx = sy = 0;
+	}
+	XRenderSetPictureFilter(dpy, src, "bilinear", NULL, 0);
+	set_transform(src, 1.0 / 8, 0, 0, 0, 1.0 / 8, 0);
+	XRenderComposite(dpy, PictOpSrc, src, None, buffer_pict, 0, 0, 0, 0, x, y, w, h);
+	for (k = 0; k < 3; k++) { XRenderFreePicture(dpy, pic[k]); XFreePixmap(dpy, pm[k]); }
+	(void)sw; (void)sh;
+#else
+	pm[0] = XCreatePixmap(dpy, desktop, sw, sh, depth);
+	pic[0] = XRenderCreatePicture(dpy, pm[0], format, 0, NULL);
 	XRenderSetPictureFilter(dpy, buffer_pict, "bilinear", NULL, 0);
 	set_transform(buffer_pict, 8, 0, x, 0, 8, y);
-	XRenderComposite(dpy, PictOpSrc, buffer_pict, None, small, 0, 0, 0, 0, 0, 0, sw, sh);
+	XRenderComposite(dpy, PictOpSrc, buffer_pict, None, pic[0], 0, 0, 0, 0, 0, 0, sw, sh);
 	reset_transform(buffer_pict);
-	XRenderSetPictureFilter(dpy, small, "bilinear", NULL, 0);
-	set_transform(small, 1.0 / 8, 0, 0, 0, 1.0 / 8, 0);
-	XRenderComposite(dpy, PictOpSrc, small, None, buffer_pict, 0, 0, 0, 0, x, y, w, h);
-	XRenderFreePicture(dpy, small);
-	XFreePixmap(dpy, pm);
+	XRenderSetPictureFilter(dpy, pic[0], "bilinear", NULL, 0);
+	set_transform(pic[0], 1.0 / 8, 0, 0, 0, 1.0 / 8, 0);
+	XRenderComposite(dpy, PictOpSrc, pic[0], None, buffer_pict, 0, 0, 0, 0, x, y, w, h);
+	XRenderFreePicture(dpy, pic[0]);
+	XFreePixmap(dpy, pm[0]);
+	(void)src; (void)k; (void)cw; (void)ch; (void)sx; (void)sy;
+#endif
 }
 
 /* one window, over what is below it; 1 while it is still moving, -1 when a

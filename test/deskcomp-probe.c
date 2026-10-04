@@ -6,6 +6,8 @@
  *   deskcomp-probe glide TITLE X Y MS    move that window to X,Y in steps over MS ms
  *                                        (as dragged), and exit
  *   deskcomp-probe frosted X Y           a red popup, 200x150, frosted at 50% (__wine_sg_acrylic, wine-sg 0745)
+ *   deskcomp-probe stripes X Y SHIFT     a popup, 300x200, of vertical stripes 4 px black,
+ *                                        4 px white, moved SHIFT px (what a frosted one blurs)
  *   deskcomp-probe full                  a white popup over the whole screen, on top
  *   deskcomp-probe shrink                a magenta one over the whole screen that, after
  *                                        2 s, leaves full screen: 300x200 at 300,200
@@ -13,6 +15,7 @@
 #include <windows.h>
 
 static COLORREF fill = RGB(255, 255, 255);
+static int stripes = -1;      /* stripes: their shift; -1, a plain fill */
 
 static LRESULT CALLBACK proc(HWND h, UINT m, WPARAM w, LPARAM l)
 {
@@ -23,6 +26,12 @@ static LRESULT CALLBACK proc(HWND h, UINT m, WPARAM w, LPARAM l)
         HBRUSH b = CreateSolidBrush(fill);
         FillRect(dc, &ps.rcPaint, b);
         DeleteObject(b);
+        if (stripes >= 0)
+        {
+            int x;
+            for (x = 0; x < 300; x++)
+                if (((x + stripes) / 4) % 2 == 0) { RECT r = { x, 0, x + 1, 200 }; FillRect(dc, &r, GetStockObject(BLACK_BRUSH)); }
+        }
         EndPaint(h, &ps);
         return 0;
     }
@@ -76,6 +85,12 @@ int wmain(int argc, WCHAR **argv)
         h = CreateWindowExW(WS_EX_TOPMOST, L"deskcomp", L"shrink", WS_POPUP | WS_VISIBLE, 0, 0,
                             GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN), 0, 0, 0, 0);
         SetTimer(h, 1, 2000, 0);
+    }
+    else if (argc >= 5 && !lstrcmpW(argv[1], L"stripes"))
+    {
+        stripes = _wtoi(argv[4]);
+        h = CreateWindowExW(WS_EX_TOOLWINDOW, L"deskcomp", L"stripes", WS_POPUP | WS_VISIBLE,
+                            _wtoi(argv[2]), _wtoi(argv[3]), 300, 200, 0, 0, 0, 0);
     }
     else if (argc >= 4 && !lstrcmpW(argv[1], L"frosted"))
     {
