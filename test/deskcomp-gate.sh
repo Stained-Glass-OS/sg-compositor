@@ -32,7 +32,7 @@ unset DISPLAY WAYLAND_DISPLAY
 
 if [ "${1:-}" = --mutants ]; then
     rc=0
-    for m in NOSHADOWS OPAQUE NOEFFECTS NOFROST NODIRECT DIRECT_STALE NO_MINRECT; do
+    for m in NOSHADOWS OPAQUE NOEFFECTS NOFROST NODIRECT DIRECT_STALE NO_MINRECT WOBBLE_TRIANGLES; do
         out=$(mktemp /var/tmp/sg-deskcomp-mutant.XXXXXX)
         cc -std=c11 -O2 -DSG_MUTANT_$m -o "$out" "$HERE/sg-deskcomp.c" -lX11 -lXcomposite -lXdamage -lXfixes -lXrender -lXext -lm \
             || { echo "SKIP: cannot build the mutant"; exit 77; }
@@ -55,7 +55,7 @@ for t in xvfb-run xdotool xwininfo import convert; do command -v $t >/dev/null |
 [ -x "$DESKCOMP" ] || { echo "SKIP: $DESKCOMP not built"; exit 77; }
 
 T=$(mktemp -d /var/tmp/sg-deskcomp.XXXXXX)
-export HOME="$T/home" XDG_CONFIG_HOME="$T/home/.config"
+export HOME="$T/home" XDG_CONFIG_HOME="$T/home/.config" SG_DESKCOMP_TIMING=1
 mkdir -p "$XDG_CONFIG_HOME/stained-glass"
 export WINEPREFIX="$T/prefix" WINEDEBUG=-all WINEDLLOVERRIDES="mscoree,mshtml=;winemenubuilder.exe=d" WINESERVER
 trap '"$WINESERVER" -k 2>/dev/null; [ -n "${KEEP:-}" ] || rm -rf "$T"' EXIT INT TERM
@@ -151,6 +151,13 @@ grep -E 'win 0x[0-9a-f]+ 600,480 ' "$T/dump.open" | grep -q 'anim=1' \
     && pass "a new window fades in, then is drawn as itself" || fail "open: $(grep -E 'win 0x[0-9a-f]+ 600,480 ' "$T/dump.open" | sort -u | head -3)"
 wob=$(grep -E 'win 0x[0-9a-f]+ [0-9-]+,[0-9-]+ 400x300 .*kind=1' "$T/dump.drag" | sed -n 's/.*wobble=\([0-9.]*\).*/\1/p' | sort -n | tail -1)
 awk -v m="${wob:-0}" 'BEGIN { exit !(m > 2) }' && pass "a dragged window wobbles (up to $wob px)" || fail "no wobble: ${wob:-none}"
+# ...and cheaply: the slowest wobble frame, the X server's time included
+# (David 2026-10-03: wobbly slow on a ThinkPad X1 -- 64 triangles a frame
+# took 192 ms on its Xwayland; one composite a tile takes 0.1 ms)
+wms=$(sed -n 's/^wobble_ms_max=\([0-9.]*\).*/\1/p' "$T/dump.drag" | sort -n | tail -1)
+tri=$(sed -n 's/.*wobble_triangles=\([0-9]*\).*/\1/p' "$T/dump.drag" | sort -n | tail -1)
+[ "${tri:-x}" = 0 ] && pass "a wobble is drawn without triangles (slowest frame here ${wms} ms)" \
+    || fail "a wobble drew ${tri:-?} triangles (slowest frame ${wms:-?} ms)"
 grep -E 'win 0x[0-9a-f]+ 2[0-9][0-9],1[0-9][0-9] 400x300 .*kind=1' "$T/dump.settled" | grep -q 'wobble=0.0' \
     && pass "and settles where it was dropped ($(grep -E '400x300 .*kind=1' "$T/dump.settled" | grep -oE ' [0-9]+,[0-9]+ ' | head -1))" \
     || fail "settled: $(grep 'kind=1' "$T/dump.settled" | head -2)"

@@ -664,8 +664,13 @@ static void draw_minimizing(struct win *w, Picture mask, double e)
  * triangles each, added up into a picture of their own (where two triangles
  * share an edge their coverage adds up to whole: no seams), then laid over
  * what is below */
+static double wobble_ms_max;   /* the slowest wobble frame, for the gate (SG_DESKCOMP_TIMING) */
+static unsigned long wobble_triangles;   /* triangles drawn for wobbles: none (they are slow on glamor) */
+static int timing = -1;
+
 static void draw_wobbling(struct win *w, Picture mask)
 {
+	double started;
 	int ww = w->w + 2 * w->bw, wh = w->h + 2 * w->bw;
 	int tx = ww > 480 ? 8 : 5, ty = wh > 360 ? 8 : 5;
 	double minx = 1e9, miny = 1e9, maxx = -1e9, maxy = -1e9;
@@ -682,6 +687,9 @@ static void draw_wobbling(struct win *w, Picture mask)
 	bx = (int)floor(minx) - 1; by = (int)floor(miny) - 1;
 	bw = (int)ceil(maxx) + 1 - bx; bh = (int)ceil(maxy) + 1 - by;
 	if (bw <= 0 || bh <= 0 || bw > 3 * dw || bh > 3 * dh) return;
+	if (timing < 0) timing = getenv("SG_DESKCOMP_TIMING") != NULL;
+	if (timing) XSync(dpy, False);
+	started = now();
 	pm = XCreatePixmap(dpy, desktop, bw, bh, 32);
 	tmp = XRenderCreatePicture(dpy, pm, argb_format, 0, NULL);
 	XRenderFillRectangle(dpy, PictOpClear, tmp, &(XRenderColor){ 0, 0, 0, 0 }, 0, 0, bw, bh);
@@ -693,7 +701,6 @@ static void draw_wobbling(struct win *w, Picture mask)
 			float u0 = (float)i / tx, u1 = (float)(i + 1) / tx, v0 = (float)j / ty, v1 = (float)(j + 1) / ty;
 			double x00, y00, x10, y10, x01, y01, x11, y11, s0 = u0 * ww, t0 = v0 * wh, sw = (u1 - u0) * ww, sh = (v1 - v0) * wh;
 			double a, b, c, d, det, ia, ib, ic, id;
-			XTriangle tri[2];
 			wobble_point(w, u0, v0, &x00, &y00);
 			wobble_point(w, u1, v0, &x10, &y10);
 			wobble_point(w, u0, v1, &x01, &y01);
@@ -706,23 +713,44 @@ static void draw_wobbling(struct win *w, Picture mask)
 			det = a * d - b * c;
 			if (fabs(det) < 1e-6) continue;
 			ia = d / det; ib = -b / det; ic = -c / det; id = a / det;
-			/* source = (s0, t0) + inverse * (destination - (x00, y00)); the
-			 * triangles' source origin is put at their first point, so the
-			 * transform sees destination coordinates */
-			set_transform(w->pict, ia, ib, s0 - ia * x00 - ib * y00, ic, id, t0 - ic * x00 - id * y00);
-			tri[0].p1 = (XPointFixed){ XDoubleToFixed(x00), XDoubleToFixed(y00) };
-			tri[0].p2 = (XPointFixed){ XDoubleToFixed(x10), XDoubleToFixed(y10) };
-			tri[0].p3 = (XPointFixed){ XDoubleToFixed(x11), XDoubleToFixed(y11) };
-			tri[1].p1 = (XPointFixed){ XDoubleToFixed(x00), XDoubleToFixed(y00) };
-			tri[1].p2 = (XPointFixed){ XDoubleToFixed(x11), XDoubleToFixed(y11) };
-			tri[1].p3 = (XPointFixed){ XDoubleToFixed(x01), XDoubleToFixed(y01) };
-			XRenderCompositeTriangles(dpy, PictOpAdd, w->pict, tmp, a8_format,
-			                          (int)floor(x00), (int)floor(y00), tri, 2);
+#ifdef SG_MUTANT_WOBBLE_TRIANGLES
+			{
+				XTriangle tri[2];
+				set_transform(w->pict, ia, ib, s0 - ia * x00 - ib * y00, ic, id, t0 - ic * x00 - id * y00);
+				tri[0].p1 = (XPointFixed){ XDoubleToFixed(x00), XDoubleToFixed(y00) };
+				tri[0].p2 = (XPointFixed){ XDoubleToFixed(x10), XDoubleToFixed(y10) };
+				tri[0].p3 = (XPointFixed){ XDoubleToFixed(x11), XDoubleToFixed(y11) };
+				tri[1].p1 = (XPointFixed){ XDoubleToFixed(x00), XDoubleToFixed(y00) };
+				tri[1].p2 = (XPointFixed){ XDoubleToFixed(x11), XDoubleToFixed(y11) };
+				tri[1].p3 = (XPointFixed){ XDoubleToFixed(x01), XDoubleToFixed(y01) };
+				XRenderCompositeTriangles(dpy, PictOpAdd, w->pict, tmp, a8_format,
+				                          (int)floor(x00), (int)floor(y00), tri, 2);
+				wobble_triangles += 2;
+				continue;
+			}
+#endif
+			/* the tile as one composite of its bounds, the window mapped onto
+			 * it by the tile's own transform (David 2026-10-03: wobbly windows
+			 * slow on a ThinkPad X1 -- triangles took 192 ms a frame on its
+			 * Xwayland's glamor, which draws them off the GPU; this takes
+			 * 0.1 ms). Neighbouring tiles overlap by their bounds; where they
+			 * do, their transforms are all but the same: no seam shows. */
+			{
+				int l = (int)floor(fmin(fmin(x00, x10), fmin(x01, x11))), t = (int)floor(fmin(fmin(y00, y10), fmin(y01, y11)));
+				int r = (int)ceil(fmax(fmax(x00, x10), fmax(x01, x11))), btm = (int)ceil(fmax(fmax(y00, y10), fmax(y01, y11)));
+				set_transform(w->pict, ia, ib, s0 - ia * x00 - ib * y00, ic, id, t0 - ic * x00 - id * y00);
+				XRenderComposite(dpy, PictOpOver, w->pict, None, tmp, l, t, 0, 0, l, t, r - l, btm - t);
+			}
 		}
 	reset_transform(w->pict);
 	XRenderComposite(dpy, PictOpOver, tmp, mask, buffer_pict, 0, 0, 0, 0, bx, by, bw, bh);
 	XRenderFreePicture(dpy, tmp);
 	XFreePixmap(dpy, pm);
+	if (timing)
+	{
+		XSync(dpy, False);   /* the X server's time too: the gate's measure only */
+		wobble_ms_max = fmax(wobble_ms_max, (now() - started) * 1000);
+	}
 }
 
 static void draw_shadow(struct win *w, double fade)
@@ -1586,6 +1614,7 @@ static void dump(void)
 	if (!(f = fopen(tmp, "w"))) return;
 	fprintf(f, "desktop=0x%lx canvas=0x%lx size=%dx%d background=%d frames=%lu direct=0x%lx\n", desktop, canvas, dw, dh,
 	        bg_pict != 0, frames, direct);
+	fprintf(f, "wobble_ms_max=%.1f wobble_triangles=%lu\n", wobble_ms_max, wobble_triangles);
 	fprintf(f, "settings shadows=%d shadow=%s animations=%d open=%s minimize=%s wobbly=%d moving=%d glass=%d\n",
 	        opt_shadows, opt_shadow, opt_anim, opt_open, opt_minimize, opt_wobbly, opt_moving, opt_glass);
 	fprintf(f, "background=%s anim_frames=%lu battery=%d wallpaper=%d icons=%d light=%d,%d,%d sites=%d\n",
@@ -1951,7 +1980,7 @@ int main(int argc, char **argv)
 		if (!XPending(dpy)) {
 			int wobbling = 0;
 			for (int i = 0; i < nwins; i++) wobbling |= wins[i].wobbling;
-			int wait = !busy ? 1000 : wobbling ? 33 : 16;   /* a wobble at 30 frames a second is enough */
+			int wait = !busy ? 1000 : 16;   /* a wobble too at 60 frames a second, now it is cheap to draw */
 			if (anim_next) {   /* the animated background's next frame */
 				int due = (int)((anim_next - now()) * 1000) + 1;
 				if (due < 1) due = 1;
