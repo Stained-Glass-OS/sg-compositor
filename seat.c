@@ -533,6 +533,12 @@ handle_key_event(struct wlr_keyboard *keyboard, struct cg_seat *seat, void *data
 
 	if (!handled && event->state == WL_KEYBOARD_KEY_STATE_PRESSED &&
 	    (keysyms_have(syms, nsyms, XKB_KEY_Super_L) || keysyms_have(syms, nsyms, XKB_KEY_Super_R) ||
+#ifndef SG_MUTANT_HELD_WIN_TO_PROGRAM
+	     /* a key with the Windows key already held: the shell's too. Ctrl+Win+
+	      * Right held down across the desktops stopped at a Linux program's
+	      * full-screen window -- the next Right went to it (David 2026-10-04) */
+	     (modifiers & WLR_MODIFIER_LOGO) ||
+#endif
 	     ((modifiers & WLR_MODIFIER_ALT) && keysyms_have(syms, nsyms, XKB_KEY_Tab)) ||
 	     ((modifiers & WLR_MODIFIER_CTRL) && (modifiers & WLR_MODIFIER_SHIFT) &&
 	      keysyms_have(syms, nsyms, XKB_KEY_Escape)))) {

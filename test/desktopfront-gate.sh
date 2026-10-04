@@ -77,6 +77,14 @@ if command -v wtype >/dev/null; then
     grep -q '^press Tab' "$T/desk.keys" && grep -q '^release Tab' "$T/desk.keys" \
         && pass "the desktop gets the key's press and release (Start, the switcher open)" \
         || fail "keys the desktop got: $(tr '\n' ' ' < "$T/desk.keys"); the Linux window got: $(grep -v asked "$T/act.out" | tr '\n' ' ')"
+    # a key with the Windows key already held (Ctrl+Win+Right across the
+    # desktops, landing on a Linux program's window): the shell's too
+    [ "$(ctl "XACTIVATE $ID")" = OK ] && sleep 1
+    : > "$T/desk.keys"
+    WAYLAND_DISPLAY="$T/priv.sock" wtype -M ctrl -M logo -k Right -m logo -m ctrl; shot heldwin
+    [ "$(px heldwin $CX $CY)" = "0,0,255" ] && grep -q '^press Right' "$T/desk.keys" \
+        && pass "a key pressed with the Windows key held (Ctrl+Win+Right) goes to the shell from a Linux window" \
+        || fail "Ctrl+Win+Right from the Linux window: $(px heldwin $CX $CY); desktop keys: $(tr '\n' ' ' < "$T/desk.keys")"
 else echo "      (no wtype: the Windows key not checked)"; fi
 kill "$AP" 2>/dev/null
 [ $RC = 0 ] && echo "RESULT: PASS" || echo "RESULT: FAIL"

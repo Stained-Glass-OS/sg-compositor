@@ -1,3 +1,14 @@
+sg-compositor (0.2.0+sg35) unstable; urgency=medium
+
+  * A key pressed with the Windows key held is the shell's from a Linux
+    program's window too, as the Windows key itself is (David 2026-10-04:
+    Ctrl+Win+Right held across the desktops stopped at a Linux program's
+    full-screen window -- the next Right went to it, and the keys had to be
+    let go and pressed again). desktopfront-gate (mutant
+    SG_MUTANT_HELD_WIN_TO_PROGRAM).
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Sun, 04 Oct 2026 17:40:00 +0000
+
 sg-compositor (0.2.0+sg34) unstable; urgency=medium
 
   * A Linux program's window taken into Wine's frame for it leaves the
