@@ -1,3 +1,18 @@
+sg-compositor (0.2.0+sg36) unstable; urgency=medium
+
+  * deskcomp: the frost reads the composite buffer through a picture of its
+    own that is never clipped. Through the frame's damage clip, Xwayland's
+    glamor (Intel, David's X1) read it as black: Start's frost went from
+    what was below it to black and back whenever a repaint came with a
+    clip -- the menu went lighter and darker 1-2 times a second over
+    Firefox, every compositor frame different (David 2026-10-04). Xvfb
+    ignores a source's clip, so deskcomp-gate never showed it: new
+    frostclip-gate runs on a headless compositor's Xwayland with glamor
+    (skips without it; mutants SG_MUTANT_BLUR_CLIPPED, NOFROST), run on
+    the X1.
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Mon, 05 Oct 2026 00:07:55 +0000
+
 sg-compositor (0.2.0+sg35) unstable; urgency=medium
 
   * A key pressed with the Windows key held is the shell's from a Linux

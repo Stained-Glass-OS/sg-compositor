@@ -103,6 +103,8 @@ static Visual *visual;
 static int depth;
 static XRenderPictFormat *format, *argb_format, *a8_format;
 static Picture canvas_pict, buffer_pict, bg_pict, black_pict;
+/* the same buffer, never clipped: what the frost reads (see blur_below) */
+static Picture buffer_read;
 static Pixmap buffer_pixmap;
 static XserverRegion damage_all;
 static int damage_event, damage_error, xfixes_event, xfixes_error, shape_event, shape_error;
@@ -787,13 +789,23 @@ static void draw_shadow(struct win *w, double fade)
  * Down by halves, three times -- each half an exact average of 2 x 2 pixels
  * -- so every pixel below counts: scaled down by 8 at once, bilinear read
  * 2 of each 8 x 8 and the frost jumped when what is below moved a pixel (a
- * cursor blinking under Start: it flickered, David 2026-10-04). */
+ * cursor blinking under Start: it flickered, David 2026-10-04).
+ * Read through buffer_read, never through buffer_pict: that one carries the
+ * frame's damage as its clip, and Xwayland's glamor (Intel, the X1) reads a
+ * clipped picture through a transform as black -- Start's frost went from
+ * what was below it to black and back whenever a repaint came with a clip:
+ * the menu went lighter and darker, 1-2 times a second over Firefox (David
+ * 2026-10-04, after sg35). Xvfb ignores a source's clip; glamor does not. */
 static void blur_below(int x, int y, int w, int h)
 {
 	int sw = w / 8 + 2, sh = h / 8 + 2;
 	Pixmap pm[3];
 	Picture pic[3];
+#ifndef SG_MUTANT_BLUR_CLIPPED
+	Picture src = buffer_read;
+#else
 	Picture src = buffer_pict;
+#endif
 	int k, cw = w, ch = h, sx = x, sy = y;
 
 	if (w <= 0 || h <= 0) return;
@@ -1714,10 +1726,12 @@ static void setup_canvas(void)
 	/* takes no input: clicks go to the windows below, where they are */
 	XShapeCombineRectangles(dpy, canvas, ShapeInput, 0, 0, NULL, 0, ShapeSet, Unsorted);
 	if (buffer_pict) XRenderFreePicture(dpy, buffer_pict);
+	if (buffer_read) XRenderFreePicture(dpy, buffer_read);
 	if (buffer_pixmap) XFreePixmap(dpy, buffer_pixmap);
 	if (canvas_pict) XRenderFreePicture(dpy, canvas_pict);
 	buffer_pixmap = XCreatePixmap(dpy, canvas, dw, dh, depth);
 	buffer_pict = XRenderCreatePicture(dpy, buffer_pixmap, format, 0, NULL);
+	buffer_read = XRenderCreatePicture(dpy, buffer_pixmap, format, 0, NULL);
 	canvas_pict = XRenderCreatePicture(dpy, canvas, format, CPSubwindowMode, &pa);
 	XMapRaised(dpy, canvas);
 	/* while this canvas lives, winex11 knows windows with alpha are blended
@@ -1753,9 +1767,10 @@ static void detach(void)
 	free_glow();
 	if (bg_pict) XRenderFreePicture(dpy, bg_pict);
 	if (buffer_pict) XRenderFreePicture(dpy, buffer_pict);
+	if (buffer_read) XRenderFreePicture(dpy, buffer_read);
 	if (canvas_pict) XRenderFreePicture(dpy, canvas_pict);
 	if (buffer_pixmap) XFreePixmap(dpy, buffer_pixmap);
-	bg_pict = buffer_pict = canvas_pict = 0;
+	bg_pict = buffer_pict = buffer_read = canvas_pict = 0;
 	buffer_pixmap = 0;
 	canvas = 0;
 	desktop = 0;
