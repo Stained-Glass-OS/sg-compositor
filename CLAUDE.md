@@ -282,8 +282,14 @@ LVDS*/DSI*, or `SG_INTERNAL_OUTPUT` -- remapped on every layout change
 WL_OUTPUT still wins. Without a built-in screen, the whole layout.
 
 Touch goes to programs as wl_touch (Xwayland: XI 2.2 touch; X emulates the
-pointer for programs that do not take touches, Wine among them -- wine-sg
-0783; wine-sg 1001 adds two-finger scrolling there).
+pointer for programs that do not take touches). Wine takes touches as touches
+since wine-sg 1150 (WM_POINTER of PT_TOUCH, WM_TOUCH, WM_GESTURE, and the
+mouse for programs that leave them to DefWindowProc).
+
+A pen's range is the root window's `_SG_PEN_IN_RANGE` (CARDINAL 1/0, set on
+tablet-tool proximity in/out, `seat_pen_range`): Xwayland's pen devices have
+no proximity class, so an X program cannot otherwise tell a pen lifted out of
+range from one held still -- Wine sends WM_POINTERLEAVE from it (wine-sg 1150).
 
 **`make test-pen`** (`test/pen-gate.sh`): a test build (`-Dtest-tablet=true`,
 never packaged) reads a pen's and a touch screen's events from
@@ -293,5 +299,7 @@ Sections: xev sees the pen as a mouse; `test/penxi2-probe.c` sees the stylus
 device with pressure 0.7 -> 45874 and tilt 20/-10; `test/pengtk-probe.c` (GTK
 3 declared by hand: no -dev package needed) reads a pen with pressure 0.7 and
 two touches; two headless outputs with `SG_INTERNAL_OUTPUT` put the pen and a
-touch on the named one. Mutants: `TABLET`, `TABLET_AS_MOUSE`,
-`NO_BUILTIN_MAP`.
+touch on the named one; `_SG_PEN_IN_RANGE` is 1 in range and 0 out; with
+`SG_TEST_TABLET_LATE` the tablet comes only at a `plug` line (X gets its pen
+devices then -- for wine-sg 1150's hotplug gate). Mutants: `TABLET`,
+`TABLET_AS_MOUSE`, `NO_BUILTIN_MAP`, `NO_PEN_RANGE`.

@@ -40,6 +40,7 @@
 #include <wlr/util/log.h>
 #if CAGE_HAS_XWAYLAND
 #include <wlr/xwayland.h>
+#include <xcb/xcb.h>
 #endif
 
 #include "decor.h"
@@ -1400,6 +1401,43 @@ handle_tablet_tool_axis(struct wl_listener *listener, void *data)
 	}
 }
 
+/* Whether a pen is in range, for X programs: the root window's
+ * _SG_PEN_IN_RANGE (CARDINAL, 1 or 0). Xwayland's pens have no proximity
+ * events -- a pen lifted out of range sends X nothing a program can tell from
+ * a pen held still -- so Wine (wine-sg 1150) reads this to send its window
+ * WM_POINTERLEAVE, as Windows does when a pen leaves the screen's range. */
+static void
+seat_pen_range(struct cg_server *server, bool in_range)
+{
+#if CAGE_HAS_XWAYLAND
+	static xcb_atom_t atom;
+	xcb_connection_t *c;
+	uint32_t value = in_range;
+
+#ifdef SG_MUTANT_NO_PEN_RANGE
+	return;
+#endif
+	if (!server->xwayland || !(c = wlr_xwayland_get_xwm_connection(server->xwayland))) {
+		return;
+	}
+	if (!atom) {
+		xcb_intern_atom_reply_t *a =
+			xcb_intern_atom_reply(c, xcb_intern_atom(c, 0, strlen("_SG_PEN_IN_RANGE"), "_SG_PEN_IN_RANGE"), NULL);
+		if (!a) {
+			return;
+		}
+		atom = a->atom;
+		free(a);
+	}
+	xcb_change_property(c, XCB_PROP_MODE_REPLACE, xcb_setup_roots_iterator(xcb_get_setup(c)).data->root, atom,
+			    XCB_ATOM_CARDINAL, 32, 1, &value);
+	xcb_flush(c);
+#else
+	(void) server;
+	(void) in_range;
+#endif
+}
+
 static void
 handle_tablet_tool_proximity(struct wl_listener *listener, void *data)
 {
@@ -1409,6 +1447,7 @@ handle_tablet_tool_proximity(struct wl_listener *listener, void *data)
 	if (seat->server->remote) {
 		return;
 	}
+	seat_pen_range(seat->server, event->state == WLR_TABLET_TOOL_PROXIMITY_IN);
 	struct cg_tablet_tool *tool = tablet_tool_get(seat, event->tablet, event->tool);
 	if (event->state != WLR_TABLET_TOOL_PROXIMITY_IN) {
 		if (tool && tool->tool_v2->focused_surface) {
@@ -1642,7 +1681,8 @@ handle_destroy(struct wl_listener *listener, void *data)
  * (X, Y from 0 to 1), "pressure P" (0 to 1), "tilt X Y" (degrees), "out"
  * -- emitted as a tablet tool's events, through the same wlr_cursor path a
  * real pen's take; and a touch screen's: "tdown ID X Y", "tmove ID X Y",
- * "tup ID" (each with its frame). */
+ * "tup ID" (each with its frame). With SG_TEST_TABLET_LATE set, the tablet
+ * is plugged in only at a "plug" line. */
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -1659,6 +1699,7 @@ static struct wlr_tablet_tool test_tool;
 static char test_buf[4096];
 static size_t test_len;
 static double test_x = 0.5, test_y = 0.5;
+static bool test_plugged;
 
 static uint32_t
 test_now(void)
@@ -1719,6 +1760,13 @@ test_tablet_line(const char *line)
 		struct wlr_touch_up_event ev = {.touch = &test_touch, .time_msec = test_now(), .touch_id = id};
 		wl_signal_emit_mutable(&test_touch.events.up, &ev);
 		wl_signal_emit_mutable(&test_touch.events.frame, NULL);
+	} else if (!strncmp(line, "plug", 4)) {
+		/* SG_TEST_TABLET_LATE: the tablet arrives now (a pen first seen
+		 * after programs started) */
+		if (!test_plugged) {
+			test_plugged = true;
+			test_seat->new_input.notify(&test_seat->new_input, &test_tablet.base);
+		}
 	} else if (sscanf(line, "in %lf %lf", &x, &y) == 2) {
 		test_x = x, test_y = y;
 		struct wlr_tablet_tool_proximity_event ev = {.tablet = &test_tablet,
@@ -1796,7 +1844,10 @@ seat_test_tablet(struct cg_seat *seat)
 	test_tool.type = WLR_TABLET_TOOL_TYPE_PEN;
 	test_tool.pressure = test_tool.tilt = true;
 	wl_signal_init(&test_tool.events.destroy);
-	seat->new_input.notify(&seat->new_input, &test_tablet.base);
+	if (!getenv("SG_TEST_TABLET_LATE")) {
+		test_plugged = true;
+		seat->new_input.notify(&seat->new_input, &test_tablet.base);
+	}
 	wlr_touch_init(&test_touch, &test_touch_impl, "sg-test-touch");
 	seat->new_input.notify(&seat->new_input, &test_touch.base);
 	wl_event_loop_add_fd(wl_display_get_event_loop(seat->server->wl_display), fd, WL_EVENT_READABLE,

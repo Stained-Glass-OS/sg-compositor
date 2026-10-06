@@ -1,3 +1,18 @@
+sg-compositor (0.2.0+sg40) unstable; urgency=medium
+
+  * A pen lifted out of range is told to X programs: the root window's
+    _SG_PEN_IN_RANGE is 1 while a pen is in range and 0 when it leaves
+    (Xwayland's pen devices have no proximity events, so a pen lifted away
+    could not be told from one held still). Wine sends its window
+    WM_POINTERLEAVE from it (wine-sg 1150).
+  * The test build can plug its tablet in later (SG_TEST_TABLET_LATE, a
+    "plug" line), for wine-sg 1150's gate of a pen first seen after a
+    program started.
+  * Test: test/pen-gate.sh sections 5 and 6 (make test-pen; mutant
+    SG_MUTANT_NO_PEN_RANGE).
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Tue, 06 Oct 2026 12:00:00 -0700
+
 sg-compositor (0.2.0+sg39) unstable; urgency=medium
 
   * A pen's pressure and tilt reach programs (Surface Pro 7, a drawing

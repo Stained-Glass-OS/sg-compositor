@@ -14,6 +14,13 @@
 #  4. With a second screen, the pen and the touch screen stay on the built-in
 #     one: before, a touch at the panel's middle landed at the seam between
 #     the two screens.
+#  5. Whether a pen is in range reaches X programs (0.2.0+sg40): the root
+#     window's _SG_PEN_IN_RANGE, 1 or 0 -- Xwayland's pens have no proximity
+#     events, so Wine (wine-sg 1150) could not tell a pen lifted away from one
+#     held still, and sent no WM_POINTERLEAVE.
+#  6. A tablet plugged in later (the test build's SG_TEST_TABLET_LATE and a
+#     "plug" line) gives X its pen devices then: what wine-sg 1150's
+#     hotplugging is tested with.
 #
 # A compositor built with -Dtest-tablet=true has a pen and a touch screen fed
 # from a FIFO (SG_TEST_TABLET_FIFO), their events taking the same wlr_cursor
@@ -21,7 +28,8 @@
 #
 #   --mutant NAME: built with SG_MUTANT_NAME; must fail:
 #     TABLET (tablets ignored), TABLET_AS_MOUSE (no tablet-v2: no pressure),
-#     NO_BUILTIN_MAP (pen and touch over every screen).
+#     NO_BUILTIN_MAP (pen and touch over every screen), NO_PEN_RANGE (no
+#     _SG_PEN_IN_RANGE: Wine cannot tell a pen left).
 set -u
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 B=${SG_PEN_BUILD:-$HERE/build-pen}
@@ -150,4 +158,28 @@ px1=$(since "$L" | sed -n 's/.*sg-test: pen at \([0-9]*\) .*/\1/p' | tail -1)
 [ -n "$px1" ] && [ -n "${px:-}" ] && [ "$px1" != "$px" ] && pass "naming the other screen built-in moves the pen there (x=$px1)" \
     || fail "the pen ignores which screen is built in (x=${px1:-none} both times)"
 stop
+
+# --- 5. a pen in range and out of it, for X programs (_SG_PEN_IN_RANGE) ---
+for t in xprop; do command -v "$t" >/dev/null || { echo "SKIP  xprop missing: the pen's range"; exit $RC; }; done
+start "xprop -root >/dev/null 2>&1; echo \$DISPLAY > $T/dpy"
+D=$(cat "$T/dpy" 2>/dev/null)
+range() { [ -n "$D" ] && [ "$D" != ":0" ] && DISPLAY=$D xprop -root _SG_PEN_IN_RANGE 2>/dev/null | sed -n 's/.* = //p'; }
+pen "in 0.5 0.5" "move 0.52 0.5"
+[ "$(range)" = 1 ] && pass "a pen in range: the root window's _SG_PEN_IN_RANGE is 1" || fail "in range: _SG_PEN_IN_RANGE '$(range)'"
+pen out
+[ "$(range)" = 0 ] && pass "lifted out of range: 0 (Xwayland's pens have no proximity events; Wine sends WM_POINTERLEAVE)" \
+    || fail "out of range: _SG_PEN_IN_RANGE '$(range)'"
+stop
+
+# --- 6. a tablet plugged in later (SG_TEST_TABLET_LATE): its X devices come then ---
+rm -f "$T/go"
+start "timeout 2 $T/penxi2-probe 400 300 > $T/before.log 2>&1; while [ ! -e $T/go ]; do sleep 0.2; done; $T/penxi2-probe 400 300 > $T/after.log 2>&1" \
+    SG_TEST_TABLET_LATE=1
+grep -q stylus "$T/before.log" && fail "a pen device before the tablet was plugged in" || pass "no pen device before the tablet comes"
+pen plug
+touch "$T/go"
+sleep 3
+stop
+grep -q 'stylus.*pressure-axis=[0-9]' "$T/after.log" && pass "plugged in, the tablet's pen is an X device with pressure" \
+    || fail "no pen device after the tablet came: $(grep -c device "$T/after.log") devices"
 exit $RC
