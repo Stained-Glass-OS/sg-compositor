@@ -256,18 +256,42 @@ David's call that MIT is fine for components, and one licence avoids
 mixed-licence files. cage's copyright notices stay on its files;
 `debian/copyright` names both.
 
-### Pens (tablet tools)
+### Pens (tablet tools) and touch screens
 
-A pen (a Surface's through iptsd, a drawing tablet) **drives the pointer**:
-`handle_new_tablet` attaches it to the cursor; its motion and proximity warp
-the cursor (`process_cursor_motion`, so the lock and decor guards apply), its
-tip is BTN_LEFT and its barrel buttons BTN_RIGHT/BTN_MIDDLE through
-`seat_pointer_button` (the mouse's own path); a seat with only a pen has the
-pointer capability. Pressure and tilt are not passed on (Wine's programs take
-a mouse). Console pens are ignored while the session is remote, as the console
-pointer is. Touch was already a click (wl_touch to Xwayland; wine-sg 0783 lets
-the X server emulate the pointer). **`make test-pen`** (`test/pen-gate.sh`):
-a test build (`-Dtest-tablet=true`, never packaged) reads a pen's events from
-`SG_TEST_TABLET_FIFO` and emits them as a real tablet device's; xev must see
-motion, button 1 from the tip, button 3 from the barrel, a held-button stroke;
-the mutant build (`SG_MUTANT_TABLET`) must fail.
+A pen (a Surface's through iptsd, a drawing tablet) moves the cursor and
+reaches programs **as a pen** through **tablet-v2** (`wlr_tablet_v2`): over a
+surface that takes one (every Xwayland window, since Xwayland binds the
+manager) it gets proximity, motion, pressure, tilt, rotation, distance, tip
+and buttons (`tablet_tool_to_program`, with wlroots' implicit grab for a
+stroke). Xwayland turns that into the X input devices `xwayland-tablet
+stylus/eraser/cursor`, whose valuators carry pressure (0..65535) and tilt
+(degrees) -- what GTK and Qt read, Wine's Wintab (XI1) and Wine's pen pointer
+messages (wine-sg 1000, XI2) -- and which move and click the X core pointer,
+so programs that know no pen still get a mouse. Over nothing that takes a pen
+(the compositor's title bars, the background) the pen is the mouse as in sg37:
+`process_cursor_motion`/`seat_pointer_button`, so the decor and lock guards
+apply; a stroke begun there stays the mouse until the tip lifts. The barrel's
+lower button is the right button, the upper the middle (Windows' mapping):
+Xwayland makes BTN_STYLUS X button 2 and BTN_STYLUS2 button 3, so they are
+swapped before tablet-v2. A pen tap focuses the window (`press_cursor_button`).
+
+**Built-in screen**: touch screens, and pens not on USB/Bluetooth (or named
+IPTS/Surface), are mapped to the built-in panel -- the output named eDP*/
+LVDS*/DSI*, or `SG_INTERNAL_OUTPUT` -- remapped on every layout change
+(`seat_map_builtin_inputs` from `handle_output_layout_change`). A udev
+WL_OUTPUT still wins. Without a built-in screen, the whole layout.
+
+Touch goes to programs as wl_touch (Xwayland: XI 2.2 touch; X emulates the
+pointer for programs that do not take touches, Wine among them -- wine-sg
+0783; wine-sg 1001 adds two-finger scrolling there).
+
+**`make test-pen`** (`test/pen-gate.sh`): a test build (`-Dtest-tablet=true`,
+never packaged) reads a pen's and a touch screen's events from
+`SG_TEST_TABLET_FIFO` (one line per write: a real device's events come in
+frames of their own, and Xwayland nets out a press and release in one frame).
+Sections: xev sees the pen as a mouse; `test/penxi2-probe.c` sees the stylus
+device with pressure 0.7 -> 45874 and tilt 20/-10; `test/pengtk-probe.c` (GTK
+3 declared by hand: no -dev package needed) reads a pen with pressure 0.7 and
+two touches; two headless outputs with `SG_INTERNAL_OUTPUT` put the pen and a
+touch on the named one. Mutants: `TABLET`, `TABLET_AS_MOUSE`,
+`NO_BUILTIN_MAP`.

@@ -31,6 +31,9 @@ struct cg_seat {
 	struct wl_list pointers;
 	struct wl_list touch;
 	struct wl_list tablets; /* sg-compositor: pens, as pointers */
+	/* sg-compositor: pens to programs as pens (pressure, tilt): Xwayland
+	 * makes them X input devices (tablet-v2) */
+	struct wlr_tablet_manager_v2 *tablet_manager;
 	struct wl_listener new_input;
 
 	struct wlr_cursor *cursor;
@@ -106,7 +109,23 @@ struct cg_tablet {
 	struct wl_list link; // seat::tablets
 	struct cg_seat *seat;
 	struct wlr_tablet *tablet;
+	struct wlr_tablet_v2_tablet *tablet_v2;
 
+	struct wl_listener destroy;
+};
+
+/* sg-compositor: a pen (tool) of a tablet, as programs see it */
+struct cg_tablet_tool {
+	struct cg_seat *seat;
+	struct wlr_tablet_v2_tablet_tool *tool_v2;
+	double tilt_x, tilt_y;
+	/* its tip is down as the mouse's left button (over no program that
+	 * takes a pen: a title bar the compositor draws, the desktop) */
+	bool pointer_down;
+	/* a stroke's surface and its offset from the layout */
+	double grab_dx, grab_dy;
+
+	struct wl_listener set_cursor;
 	struct wl_listener destroy;
 };
 
@@ -127,6 +146,9 @@ void seat_destroy(struct cg_seat *seat);
 struct cg_view *seat_get_focus(struct cg_seat *seat);
 void seat_set_focus(struct cg_seat *seat, struct cg_view *view);
 void seat_center_cursor(struct cg_seat *seat);
+/* Touch screens and built-in pens to the built-in screen (an output was
+ * added or removed) */
+void seat_map_builtin_inputs(struct cg_seat *seat);
 /* The pointer's size: Settings' (effects.conf cursor=), else the screen's
  * recommended scale's share of 24 px; force: look now (an output changed),
  * else at most once a second. */

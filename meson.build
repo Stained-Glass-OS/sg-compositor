@@ -47,6 +47,8 @@ wayland_server = dependency('wayland-server')
 freetype       = dependency('freetype2')
 xcb            = dependency('xcb')
 xkbcommon      = dependency('xkbcommon')
+# sg-compositor: a pen's bus (built in or a USB tablet), seat.c
+libinput       = dependency('libinput')
 math           = cc.find_library('m')
 
 wl_protocol_dir = wayland_protos.get_variable('pkgdatadir')
@@ -59,6 +61,8 @@ wayland_scanner_server = generator(
 
 server_protocols = [
   [wl_protocol_dir, 'stable/xdg-shell/xdg-shell.xml'],
+  # sg-compositor: a pen's pressure and tilt to programs (wlr_tablet_v2.h)
+  [wl_protocol_dir, 'stable/tablet/tablet-v2.xml'],
   # sg-compositor: not in wayland-protocols; vendored from wlroots (MIT).
   [meson.current_source_dir(), 'protocol/wlr-output-power-management-unstable-v1.xml'],
   # screen capture for everyone, secure screens blanked (public_capture.c)
@@ -172,6 +176,7 @@ executable(
     wayland_server,
     wlroots,
     xkbcommon,
+    libinput,
     freetype,
     xcb,
     math,

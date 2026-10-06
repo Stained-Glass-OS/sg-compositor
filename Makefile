@@ -155,10 +155,15 @@ test-animbg: build
 	@sh test/animbg-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc
 	@sh test/animbg-gate.sh --mutants; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc
 
-# A pen drives the pointer (a Surface's pen, a drawing tablet): a test build
-# (-Dtest-tablet=true, build-pen/) feeds a pen from a FIFO; the mutant build
-# (SG_MUTANT_TABLET, build-pen-mutant/) must fail.
+# A pen drives the pointer (a Surface's pen, a drawing tablet), its pressure
+# and tilt reach X programs (Xwayland's tablet devices, GTK), touches reach
+# GTK, and pen and touch stay on the built-in screen: a test build
+# (-Dtest-tablet=true, build-pen/) feeds them from a FIFO; each mutant build
+# (build-pen-mutant-NAME/) must fail.
 .PHONY: test-pen
 test-pen:
 	@sh test/pen-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || [ $$rc -eq 0 ] || exit $$rc; \
-	 sh test/pen-gate.sh --mutant >/dev/null 2>&1; rc=$$?; [ $$rc -eq 1 ] || { echo "pen-gate: the mutant was not caught ($$rc)"; exit 1; }
+	 for m in TABLET TABLET_AS_MOUSE NO_BUILTIN_MAP; do \
+	   sh test/pen-gate.sh --mutant $$m >/dev/null 2>&1; rc=$$?; [ $$rc -eq 1 ] || { echo "pen-gate: the mutant $$m was not caught ($$rc)"; exit 1; }; \
+	   echo "pen-gate: mutant $$m caught"; \
+	 done

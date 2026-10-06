@@ -1,3 +1,23 @@
+sg-compositor (0.2.0+sg39) unstable; urgency=medium
+
+  * A pen's pressure and tilt reach programs (Surface Pro 7, a drawing
+    tablet): the pen goes to the program under it as a pen through
+    tablet-v2, so Xwayland gives X programs the "xwayland-tablet stylus"
+    device with pressure and tilt -- GTK and Qt drawing programs, Wine's
+    Wintab and pointer messages read them; it still moves and clicks the X
+    pointer for programs that take only a mouse. Before, every stroke had one
+    width. Over the compositor's title bars the pen is the mouse, as before.
+  * The pen and the touch screen stay on the built-in screen when a monitor
+    is attached (an eDP/LVDS/DSI output, remapped when screens change);
+    before, they spread over every screen and a touch landed away from the
+    finger. A USB drawing tablet still spans every screen.
+  * Test: test/pen-gate.sh (make test-pen): X's pen device with pressure
+    and tilt, a GTK program reading the pen's pressure and two touches, the
+    built-in screen with two outputs; mutants SG_MUTANT_TABLET,
+    SG_MUTANT_TABLET_AS_MOUSE, SG_MUTANT_NO_BUILTIN_MAP.
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Mon, 05 Oct 2026 21:30:00 -0700
+
 sg-compositor (0.2.0+sg38) unstable; urgency=medium
 
   * High-resolution screens (David 2026-10-05, a Surface Pro 7 at

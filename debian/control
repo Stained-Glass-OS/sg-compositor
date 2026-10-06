@@ -4,7 +4,7 @@ Priority: optional
 Maintainer: Stained Glass OS <dev@stained-glass.example>
 Build-Depends: debhelper-compat (= 13), meson, ninja-build, pkgconf,
  libwlroots-0.18-dev, libwayland-dev, wayland-protocols, libxkbcommon-dev,
- libfreetype-dev, libxcb1-dev,
+ libfreetype-dev, libxcb1-dev, libinput-dev,
  libx11-dev, libxcomposite-dev, libxdamage-dev, libxfixes-dev, libxrender-dev, libxext-dev
 Standards-Version: 4.7.0
 Homepage: https://github.com/Stained-Glass-OS/sg-compositor

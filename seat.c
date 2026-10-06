@@ -31,6 +31,8 @@
 #include <wlr/types/wlr_scene.h>
 #include <wlr/types/wlr_seat.h>
 #include <wlr/types/wlr_tablet_tool.h>
+#include <wlr/types/wlr_tablet_v2.h>
+#include <wlr/backend/libinput.h>
 #include <wlr/types/wlr_touch.h>
 #include <wlr/types/wlr_virtual_keyboard_v1.h>
 #include <wlr/types/wlr_virtual_pointer_v1.h>
@@ -195,6 +197,8 @@ handle_touch_destroy(struct wl_listener *listener, void *data)
 	update_capabilities(seat);
 }
 
+static void map_builtin_input(struct cg_seat *seat, struct wlr_input_device *device, const char *output_name);
+
 static void
 handle_new_touch(struct cg_seat *seat, struct wlr_touch *wlr_touch)
 {
@@ -212,7 +216,7 @@ handle_new_touch(struct cg_seat *seat, struct wlr_touch *wlr_touch)
 	touch->destroy.notify = handle_touch_destroy;
 	wl_signal_add(&wlr_touch->base.events.destroy, &touch->destroy);
 
-	map_input_device_to_output(seat, &wlr_touch->base, wlr_touch->output_name);
+	map_builtin_input(seat, &wlr_touch->base, wlr_touch->output_name);
 }
 
 /* sg-compositor: a pen (a tablet tool -- a Surface's pen through iptsd, a
@@ -234,6 +238,87 @@ handle_tablet_destroy(struct wl_listener *listener, void *data)
 	update_capabilities(seat);
 }
 
+/* sg-compositor: is this the screen built into the machine (a laptop's or a
+ * tablet PC's panel)? SG_INTERNAL_OUTPUT names it outright (a test's headless
+ * output); otherwise an embedded DisplayPort, LVDS or DSI connector is. */
+static bool
+output_is_builtin(struct wlr_output *output)
+{
+	const char *named = getenv("SG_INTERNAL_OUTPUT");
+	if (named && *named) {
+		return strcmp(output->name, named) == 0;
+	}
+	return !strncmp(output->name, "eDP", 3) || !strncmp(output->name, "LVDS", 4) ||
+	       !strncmp(output->name, "DSI", 3);
+}
+
+/* A pen or touch screen built into the machine, which draws on its own
+ * screen: every touch screen, and a pen not on USB or Bluetooth (a
+ * Surface's, through iptsd; a convertible's I2C digitizer). A USB drawing
+ * tablet spans every screen, as a mouse does. */
+static bool
+input_is_builtin(struct wlr_input_device *device)
+{
+#ifdef SG_MUTANT_NO_BUILTIN_MAP
+	return false;
+#endif
+	if (device->type == WLR_INPUT_DEVICE_TOUCH) {
+		return true;
+	}
+	if (device->name && (strstr(device->name, "IPTS") || strstr(device->name, "Surface"))) {
+		return true;
+	}
+	if (wlr_input_device_is_libinput(device)) {
+		struct libinput_device *li = wlr_libinput_get_device_handle(device);
+		unsigned bus = li ? libinput_device_get_id_bustype(li) : 0;
+		return bus != 0x03 /* BUS_USB */ && bus != 0x05 /* BUS_BLUETOOTH */;
+	}
+	return true;
+}
+
+/* sg-compositor (Surface Pro 7 with a monitor attached): the pen and the
+ * touch screen are on the built-in screen, so a touch lands under the finger
+ * -- spread over every screen, a touch at the panel's middle went to the
+ * seam between the two. A device whose udev names its output (WL_OUTPUT)
+ * keeps that. No built-in screen (a desktop): the whole layout, as before. */
+static void
+map_builtin_input(struct cg_seat *seat, struct wlr_input_device *device, const char *output_name)
+{
+	if (output_name) {
+		map_input_device_to_output(seat, device, output_name);
+		return;
+	}
+	if (!input_is_builtin(device)) {
+		return;
+	}
+	struct cg_output *output;
+	wl_list_for_each (output, &seat->server->outputs, link) {
+		if (output_is_builtin(output->wlr_output)) {
+			wlr_log(WLR_INFO, "%s is on the built-in screen %s", device->name ? device->name : "(input)",
+				output->wlr_output->name);
+			wlr_cursor_map_input_to_output(seat->cursor, device, output->wlr_output);
+			return;
+		}
+	}
+	wlr_cursor_map_input_to_output(seat->cursor, device, NULL);
+}
+
+void
+seat_map_builtin_inputs(struct cg_seat *seat)
+{
+	if (!seat) {
+		return;
+	}
+	struct cg_touch *touch;
+	wl_list_for_each (touch, &seat->touch, link) {
+		map_builtin_input(seat, &touch->touch->base, touch->touch->output_name);
+	}
+	struct cg_tablet *tablet;
+	wl_list_for_each (tablet, &seat->tablets, link) {
+		map_builtin_input(seat, &tablet->tablet->base, NULL);
+	}
+}
+
 static void
 handle_new_tablet(struct cg_seat *seat, struct wlr_tablet *wlr_tablet)
 {
@@ -250,6 +335,11 @@ handle_new_tablet(struct cg_seat *seat, struct wlr_tablet *wlr_tablet)
 	tablet->seat = seat;
 	tablet->tablet = wlr_tablet;
 	wlr_cursor_attach_input_device(seat->cursor, &wlr_tablet->base);
+	/* programs that take a pen get it as one: Xwayland makes it the X
+	 * input devices "xwayland-tablet stylus/eraser", with pressure and
+	 * tilt valuators */
+	tablet->tablet_v2 = wlr_tablet_create(seat->tablet_manager, seat->seat, &wlr_tablet->base);
+	map_builtin_input(seat, &wlr_tablet->base, NULL);
 
 	wl_list_insert(&seat->tablets, &tablet->link);
 	tablet->destroy.notify = handle_tablet_destroy;
@@ -1145,18 +1235,169 @@ tablet_pointer_to(struct cg_seat *seat, struct wlr_input_device *device, uint32_
 	wlr_seat_pointer_notify_frame(seat->seat);
 }
 
+/* sg-compositor: a pen reaches the programs that take one as a pen
+ * (tablet-v2) -- pressure and tilt with it. Xwayland takes one for every X
+ * window (Wine's and the Linux programs'): its X input device has pressure
+ * and tilt valuators (GTK, Qt, Wine's Wintab and pointer messages read them)
+ * and moves and clicks the X pointer as well, so a program that knows no
+ * pen still has a mouse. Over nothing that takes a pen (the compositor's
+ * title bars and outlines, the background) the pen is the mouse as before. */
+static void
+handle_tablet_tool_set_cursor(struct wl_listener *listener, void *data)
+{
+	struct cg_tablet_tool *tool = wl_container_of(listener, tool, set_cursor);
+	struct wlr_tablet_v2_event_cursor *event = data;
+
+	/* only the program the pen is over may shape its pointer */
+	if (!tool->tool_v2->focused_surface || !event->seat_client ||
+	    wl_resource_get_client(tool->tool_v2->focused_surface->resource) != event->seat_client->client) {
+		return;
+	}
+	wlr_cursor_set_surface(tool->seat->cursor, event->surface, event->hotspot_x, event->hotspot_y);
+}
+
+static void
+handle_tablet_tool_destroy(struct wl_listener *listener, void *data)
+{
+	struct cg_tablet_tool *tool = wl_container_of(listener, tool, destroy);
+
+	wl_list_remove(&tool->set_cursor.link);
+	wl_list_remove(&tool->destroy.link);
+	free(tool);
+}
+
+static struct cg_tablet_tool *
+tablet_tool_get(struct cg_seat *seat, struct wlr_tablet *wlr_tablet, struct wlr_tablet_tool *wlr_tool)
+{
+	if (wlr_tool->data) {
+		return wlr_tool->data;
+	}
+	struct cg_tablet_tool *tool = calloc(1, sizeof(*tool));
+	if (!tool) {
+		return NULL;
+	}
+	tool->tool_v2 = wlr_tablet_tool_create(seat->tablet_manager, seat->seat, wlr_tool);
+	if (!tool->tool_v2) {
+		free(tool);
+		return NULL;
+	}
+	tool->seat = seat;
+	tool->set_cursor.notify = handle_tablet_tool_set_cursor;
+	wl_signal_add(&tool->tool_v2->events.set_cursor, &tool->set_cursor);
+	tool->destroy.notify = handle_tablet_tool_destroy;
+	wl_signal_add(&wlr_tool->events.destroy, &tool->destroy);
+	wlr_tool->data = tool;
+	return tool;
+}
+
+static struct wlr_tablet_v2_tablet *
+tablet_v2_of(struct cg_seat *seat, struct wlr_tablet *wlr_tablet)
+{
+	struct cg_tablet *tablet;
+	wl_list_for_each (tablet, &seat->tablets, link) {
+		if (tablet->tablet == wlr_tablet) {
+			return tablet->tablet_v2;
+		}
+	}
+	return NULL;
+}
+
+/* The pen is at the cursor: to the program under it as a pen, if it takes
+ * one (true), else nothing sent (false: the caller makes it the mouse). In
+ * a stroke (tip down) it stays with the program the stroke began on. */
+static bool
+tablet_tool_to_program(struct cg_seat *seat, struct wlr_tablet *wlr_tablet, struct cg_tablet_tool *tool)
+{
+#ifdef SG_MUTANT_TABLET_AS_MOUSE
+	return false;
+#endif
+	struct wlr_tablet_v2_tablet *tablet_v2 = tablet_v2_of(seat, wlr_tablet);
+	if (!tool || !tablet_v2 || tool->pointer_down) {
+		return false;
+	}
+	double lx = seat->cursor->x, ly = seat->cursor->y;
+	if (tool->tool_v2->is_down && tool->tool_v2->focused_surface) {
+		wlr_tablet_v2_tablet_tool_notify_motion(tool->tool_v2, lx - tool->grab_dx, ly - tool->grab_dy);
+		return true;
+	}
+
+	double sx, sy;
+	struct wlr_surface *surface = NULL;
+	struct cg_view *view = desktop_view_at(seat->server, lx, ly, &surface, &sx, &sy);
+	if (!view || !surface || !wlr_surface_accepts_tablet_v2(tablet_v2, surface)) {
+		if (tool->tool_v2->focused_surface) {
+			wlr_tablet_v2_tablet_tool_notify_proximity_out(tool->tool_v2);
+		}
+		return false;
+	}
+	if (tool->tool_v2->focused_surface != surface) {
+		if (tool->tool_v2->focused_surface) {
+			wlr_tablet_v2_tablet_tool_notify_proximity_out(tool->tool_v2);
+		}
+		wlr_tablet_v2_tablet_tool_notify_proximity_in(tool->tool_v2, tablet_v2, surface);
+		/* the program's own pointer shape, once it sets one */
+		wlr_cursor_set_xcursor(seat->cursor, seat->xcursor_manager, DEFAULT_XCURSOR);
+	}
+	tool->grab_dx = lx - sx;
+	tool->grab_dy = ly - sy;
+	wlr_tablet_v2_tablet_tool_notify_motion(tool->tool_v2, sx, sy);
+	return true;
+}
+
+/* where the pen is now, from an event's X and Y (NAN: unchanged) */
+static void
+tablet_cursor_to(struct cg_seat *seat, struct wlr_input_device *device, double x, double y)
+{
+	wlr_cursor_warp_absolute(seat->cursor, device, x, y);
+}
+
 static void
 handle_tablet_tool_axis(struct wl_listener *listener, void *data)
 {
 	struct cg_seat *seat = wl_container_of(listener, seat, tablet_tool_axis);
 	struct wlr_tablet_tool_axis_event *event = data;
 
-	if (seat->server->remote || !(event->updated_axes & (WLR_TABLET_TOOL_AXIS_X | WLR_TABLET_TOOL_AXIS_Y))) {
+	if (seat->server->remote) {
 		return;
 	}
-	tablet_pointer_to(seat, &event->tablet->base, event->time_msec,
-			  event->updated_axes & WLR_TABLET_TOOL_AXIS_X ? event->x : NAN,
-			  event->updated_axes & WLR_TABLET_TOOL_AXIS_Y ? event->y : NAN);
+	struct cg_tablet_tool *tool = tablet_tool_get(seat, event->tablet, event->tool);
+	bool moved = event->updated_axes & (WLR_TABLET_TOOL_AXIS_X | WLR_TABLET_TOOL_AXIS_Y);
+	if (moved) {
+		tablet_cursor_to(seat, &event->tablet->base, event->updated_axes & WLR_TABLET_TOOL_AXIS_X ? event->x : NAN,
+				 event->updated_axes & WLR_TABLET_TOOL_AXIS_Y ? event->y : NAN);
+	}
+	if (tool && tablet_tool_to_program(seat, event->tablet, tool)) {
+		struct wlr_tablet_v2_tablet_tool *t = tool->tool_v2;
+		if (event->updated_axes & WLR_TABLET_TOOL_AXIS_PRESSURE) {
+			wlr_tablet_v2_tablet_tool_notify_pressure(t, event->pressure);
+		}
+		if (event->updated_axes & WLR_TABLET_TOOL_AXIS_DISTANCE) {
+			wlr_tablet_v2_tablet_tool_notify_distance(t, event->distance);
+		}
+		if (event->updated_axes & (WLR_TABLET_TOOL_AXIS_TILT_X | WLR_TABLET_TOOL_AXIS_TILT_Y)) {
+			if (event->updated_axes & WLR_TABLET_TOOL_AXIS_TILT_X) {
+				tool->tilt_x = event->tilt_x;
+			}
+			if (event->updated_axes & WLR_TABLET_TOOL_AXIS_TILT_Y) {
+				tool->tilt_y = event->tilt_y;
+			}
+			wlr_tablet_v2_tablet_tool_notify_tilt(t, tool->tilt_x, tool->tilt_y);
+		}
+		if (event->updated_axes & WLR_TABLET_TOOL_AXIS_ROTATION) {
+			wlr_tablet_v2_tablet_tool_notify_rotation(t, event->rotation);
+		}
+		if (event->updated_axes & WLR_TABLET_TOOL_AXIS_SLIDER) {
+			wlr_tablet_v2_tablet_tool_notify_slider(t, event->slider);
+		}
+		if (event->updated_axes & WLR_TABLET_TOOL_AXIS_WHEEL) {
+			wlr_tablet_v2_tablet_tool_notify_wheel(t, event->wheel_delta, 0);
+		}
+		seat_notify_activity(seat->server);
+		return;
+	}
+	if (moved) {
+		tablet_pointer_to(seat, &event->tablet->base, event->time_msec, NAN, NAN);
+	}
 }
 
 static void
@@ -1165,10 +1406,22 @@ handle_tablet_tool_proximity(struct wl_listener *listener, void *data)
 	struct cg_seat *seat = wl_container_of(listener, seat, tablet_tool_proximity);
 	struct wlr_tablet_tool_proximity_event *event = data;
 
-	if (seat->server->remote || event->state != WLR_TABLET_TOOL_PROXIMITY_IN) {
+	if (seat->server->remote) {
 		return;
 	}
-	tablet_pointer_to(seat, &event->tablet->base, event->time_msec, event->x, event->y);
+	struct cg_tablet_tool *tool = tablet_tool_get(seat, event->tablet, event->tool);
+	if (event->state != WLR_TABLET_TOOL_PROXIMITY_IN) {
+		if (tool && tool->tool_v2->focused_surface) {
+			wlr_tablet_v2_tablet_tool_notify_proximity_out(tool->tool_v2);
+		}
+		return;
+	}
+	tablet_cursor_to(seat, &event->tablet->base, event->x, event->y);
+	if (tablet_tool_to_program(seat, event->tablet, tool)) {
+		seat_notify_activity(seat->server);
+		return;
+	}
+	tablet_pointer_to(seat, &event->tablet->base, event->time_msec, NAN, NAN);
 }
 
 static void
@@ -1180,10 +1433,34 @@ handle_tablet_tool_tip(struct wl_listener *listener, void *data)
 	if (seat->server->remote) {
 		return;
 	}
-	tablet_pointer_to(seat, &event->tablet->base, event->time_msec, event->x, event->y);
+	struct cg_tablet_tool *tool = tablet_tool_get(seat, event->tablet, event->tool);
+	bool down = event->state == WLR_TABLET_TOOL_TIP_DOWN;
+	tablet_cursor_to(seat, &event->tablet->base, event->x, event->y);
+	if (tablet_tool_to_program(seat, event->tablet, tool)) {
+		if (down) {
+			/* a tap of the pen, like a click, brings the window
+			 * forward (and lets the session's clipboard reach an
+			 * elevated one) */
+			double sx, sy;
+			struct wlr_surface *surface;
+			elevated_user_input(
+				desktop_view_at(seat->server, seat->cursor->x, seat->cursor->y, &surface, &sx, &sy));
+			press_cursor_button(seat, &event->tablet->base, event->time_msec, BTN_LEFT, WLR_BUTTON_PRESSED,
+					    seat->cursor->x, seat->cursor->y);
+			wlr_tablet_v2_tablet_tool_notify_down(tool->tool_v2);
+			wlr_tablet_tool_v2_start_implicit_grab(tool->tool_v2);
+		} else {
+			wlr_tablet_v2_tablet_tool_notify_up(tool->tool_v2);
+		}
+		seat_notify_activity(seat->server);
+		return;
+	}
+	tablet_pointer_to(seat, &event->tablet->base, event->time_msec, NAN, NAN);
+	if (tool) {
+		tool->pointer_down = down;
+	}
 	seat_pointer_button(seat, &event->tablet->base, event->time_msec, BTN_LEFT,
-			    event->state == WLR_TABLET_TOOL_TIP_DOWN ? WL_POINTER_BUTTON_STATE_PRESSED
-								     : WL_POINTER_BUTTON_STATE_RELEASED);
+			    down ? WL_POINTER_BUTTON_STATE_PRESSED : WL_POINTER_BUTTON_STATE_RELEASED);
 	wlr_seat_pointer_notify_frame(seat->seat);
 }
 
@@ -1196,9 +1473,21 @@ handle_tablet_tool_button(struct wl_listener *listener, void *data)
 	if (seat->server->remote) {
 		return;
 	}
-	/* the barrel's buttons: the lower is the right button, the upper the middle */
+	/* the barrel's buttons: the lower is the right button, the upper the
+	 * middle -- the pen's buttons on Windows. Xwayland makes BTN_STYLUS X's
+	 * button 2 and BTN_STYLUS2 button 3, so to a program taking the pen
+	 * they are swapped. */
 	uint32_t button = event->button == BTN_STYLUS ? BTN_RIGHT : event->button == BTN_STYLUS2 ? BTN_MIDDLE : 0;
 	if (!button) {
+		return;
+	}
+	struct cg_tablet_tool *tool = tablet_tool_get(seat, event->tablet, event->tool);
+	if (tool && tool->tool_v2->focused_surface && !tool->pointer_down) {
+		wlr_tablet_v2_tablet_tool_notify_button(tool->tool_v2,
+							button == BTN_RIGHT ? BTN_STYLUS2 : BTN_STYLUS,
+							event->state == WLR_BUTTON_PRESSED ? ZWP_TABLET_PAD_V2_BUTTON_STATE_PRESSED
+											   : ZWP_TABLET_PAD_V2_BUTTON_STATE_RELEASED);
+		seat_notify_activity(seat->server);
 		return;
 	}
 	seat_pointer_button(seat, &event->tablet->base, event->time_msec, button,
@@ -1350,15 +1639,21 @@ handle_destroy(struct wl_listener *listener, void *data)
 /* Test builds only (meson -Dtest-tablet=true; test/pen-gate.sh): a pen for a
  * headless compositor, which has no input devices. SG_TEST_TABLET_FIFO names
  * a FIFO of lines -- "in X Y", "move X Y", "down", "up", "button CODE 1|0"
- * (X, Y from 0 to 1) -- emitted as a tablet tool's events, through the same
- * wlr_cursor path a real pen's take. */
+ * (X, Y from 0 to 1), "pressure P" (0 to 1), "tilt X Y" (degrees), "out"
+ * -- emitted as a tablet tool's events, through the same wlr_cursor path a
+ * real pen's take; and a touch screen's: "tdown ID X Y", "tmove ID X Y",
+ * "tup ID" (each with its frame). */
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <time.h>
 #include <wlr/interfaces/wlr_tablet_tool.h>
+#include <wlr/interfaces/wlr_touch.h>
 
 static const struct wlr_tablet_impl test_tablet_impl = {.name = "sg-test-pen"};
+static const struct wlr_touch_impl test_touch_impl = {.name = "sg-test-touch"};
+static struct wlr_touch test_touch;
+static struct cg_seat *test_seat;
 static struct wlr_tablet test_tablet;
 static struct wlr_tablet_tool test_tool;
 static char test_buf[4096];
@@ -1378,7 +1673,53 @@ test_tablet_line(const char *line)
 {
 	double x, y;
 	unsigned code, pressed;
-	if (sscanf(line, "in %lf %lf", &x, &y) == 2) {
+	int id;
+	if (sscanf(line, "pressure %lf", &x) == 1) {
+		struct wlr_tablet_tool_axis_event ev = {.tablet = &test_tablet,
+							.tool = &test_tool,
+							.time_msec = test_now(),
+							.updated_axes = WLR_TABLET_TOOL_AXIS_PRESSURE,
+							.x = test_x,
+							.y = test_y,
+							.pressure = x};
+		wl_signal_emit_mutable(&test_tablet.events.axis, &ev);
+	} else if (sscanf(line, "tilt %lf %lf", &x, &y) == 2) {
+		struct wlr_tablet_tool_axis_event ev = {.tablet = &test_tablet,
+							.tool = &test_tool,
+							.time_msec = test_now(),
+							.updated_axes = WLR_TABLET_TOOL_AXIS_TILT_X | WLR_TABLET_TOOL_AXIS_TILT_Y,
+							.x = test_x,
+							.y = test_y,
+							.tilt_x = x,
+							.tilt_y = y};
+		wl_signal_emit_mutable(&test_tablet.events.axis, &ev);
+	} else if (!strncmp(line, "out", 3)) {
+		struct wlr_tablet_tool_proximity_event ev = {.tablet = &test_tablet,
+							     .tool = &test_tool,
+							     .time_msec = test_now(),
+							     .x = test_x,
+							     .y = test_y,
+							     .state = WLR_TABLET_TOOL_PROXIMITY_OUT};
+		wl_signal_emit_mutable(&test_tablet.events.proximity, &ev);
+	} else if (sscanf(line, "tdown %d %lf %lf", &id, &x, &y) == 3) {
+		/* where a touch there lands, as handle_touch_down maps it */
+		double lx, ly;
+		wlr_cursor_absolute_to_layout_coords(test_seat->cursor, &test_touch.base, x, y, &lx, &ly);
+		wlr_log(WLR_ERROR, "sg-test: touch at %.0f %.0f", lx, ly);
+		struct wlr_touch_down_event ev = {
+			.touch = &test_touch, .time_msec = test_now(), .touch_id = id, .x = x, .y = y};
+		wl_signal_emit_mutable(&test_touch.events.down, &ev);
+		wl_signal_emit_mutable(&test_touch.events.frame, NULL);
+	} else if (sscanf(line, "tmove %d %lf %lf", &id, &x, &y) == 3) {
+		struct wlr_touch_motion_event ev = {
+			.touch = &test_touch, .time_msec = test_now(), .touch_id = id, .x = x, .y = y};
+		wl_signal_emit_mutable(&test_touch.events.motion, &ev);
+		wl_signal_emit_mutable(&test_touch.events.frame, NULL);
+	} else if (sscanf(line, "tup %d", &id) == 1) {
+		struct wlr_touch_up_event ev = {.touch = &test_touch, .time_msec = test_now(), .touch_id = id};
+		wl_signal_emit_mutable(&test_touch.events.up, &ev);
+		wl_signal_emit_mutable(&test_touch.events.frame, NULL);
+	} else if (sscanf(line, "in %lf %lf", &x, &y) == 2) {
 		test_x = x, test_y = y;
 		struct wlr_tablet_tool_proximity_event ev = {.tablet = &test_tablet,
 							     .tool = &test_tool,
@@ -1387,6 +1728,7 @@ test_tablet_line(const char *line)
 							     .y = y,
 							     .state = WLR_TABLET_TOOL_PROXIMITY_IN};
 		wl_signal_emit_mutable(&test_tablet.events.proximity, &ev);
+		wlr_log(WLR_ERROR, "sg-test: pen at %.0f %.0f", test_seat->cursor->x, test_seat->cursor->y);
 	} else if (sscanf(line, "move %lf %lf", &x, &y) == 2) {
 		test_x = x, test_y = y;
 		struct wlr_tablet_tool_axis_event ev = {.tablet = &test_tablet,
@@ -1449,9 +1791,14 @@ seat_test_tablet(struct cg_seat *seat)
 		wlr_log(WLR_ERROR, "Cannot open the test pen's FIFO %s: %s", path, strerror(errno));
 		return;
 	}
+	test_seat = seat;
 	wlr_tablet_init(&test_tablet, &test_tablet_impl, "sg-test-pen");
 	test_tool.type = WLR_TABLET_TOOL_TYPE_PEN;
+	test_tool.pressure = test_tool.tilt = true;
+	wl_signal_init(&test_tool.events.destroy);
 	seat->new_input.notify(&seat->new_input, &test_tablet.base);
+	wlr_touch_init(&test_touch, &test_touch_impl, "sg-test-touch");
+	seat->new_input.notify(&seat->new_input, &test_touch.base);
 	wl_event_loop_add_fd(wl_display_get_event_loop(seat->server->wl_display), fd, WL_EVENT_READABLE,
 			     handle_test_tablet_fd, seat);
 }
@@ -1538,6 +1885,7 @@ seat_create(struct cg_server *server, struct wlr_backend *backend)
 	wl_list_init(&seat->pointers);
 	wl_list_init(&seat->touch);
 	wl_list_init(&seat->tablets);
+	seat->tablet_manager = wlr_tablet_v2_create(server->wl_display);
 
 	seat->new_input.notify = handle_new_input;
 	wl_signal_add(&backend->events.new_input, &seat->new_input);

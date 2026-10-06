@@ -209,6 +209,9 @@ handle_output_layout_change(struct wl_listener *listener, void *data)
 
 	view_position_all(server);
 	update_output_manager_config(server);
+	/* sg-compositor: the pen and touch screen on the built-in screen,
+	 * wherever it now is (a monitor plugged in or out) */
+	seat_map_builtin_inputs(server->seat);
 }
 
 static bool
