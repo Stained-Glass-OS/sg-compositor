@@ -29,6 +29,7 @@ struct cg_seat {
 	struct wl_list keyboard_groups;
 	struct wl_list pointers;
 	struct wl_list touch;
+	struct wl_list tablets; /* sg-compositor: pens, as pointers */
 	struct wl_listener new_input;
 
 	struct wlr_cursor *cursor;
@@ -46,6 +47,11 @@ struct cg_seat {
 	struct wl_listener touch_up;
 	struct wl_listener touch_motion;
 	struct wl_listener touch_frame;
+
+	struct wl_listener tablet_tool_axis;
+	struct wl_listener tablet_tool_proximity;
+	struct wl_listener tablet_tool_tip;
+	struct wl_listener tablet_tool_button;
 
 	struct wl_list drag_icons;
 	struct wl_listener request_start_drag;
@@ -88,6 +94,14 @@ struct cg_touch {
 	struct wl_list link; // seat::touch
 	struct cg_seat *seat;
 	struct wlr_touch *touch;
+
+	struct wl_listener destroy;
+};
+
+struct cg_tablet {
+	struct wl_list link; // seat::tablets
+	struct cg_seat *seat;
+	struct wlr_tablet *tablet;
 
 	struct wl_listener destroy;
 };

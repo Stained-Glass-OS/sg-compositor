@@ -18,7 +18,7 @@ install: build
 # The gate is sg-session's own session gate, run with this compositor hosting
 # the session instead of cage. Milestone 1 of ADR 0011 is exactly "that still
 # passes", so the gate is the same one, not a new one.
-test: test-session test-lock test-secure test-secure-dim test-xwindows test-privileged test-sas test-power test-elevated test-popup test-backdrop test-xfloat test-decor test-decorlook test-capture test-wmreq test-jumpclick test-bigwindow test-desktopfront test-selfmove test-deskcomp test-glassframe test-animbg test-embedfocus
+test: test-session test-lock test-secure test-secure-dim test-xwindows test-privileged test-sas test-power test-elevated test-popup test-backdrop test-xfloat test-decor test-decorlook test-capture test-wmreq test-jumpclick test-bigwindow test-desktopfront test-selfmove test-deskcomp test-glassframe test-animbg test-embedfocus test-pen
 
 test-session: build
 	@[ -d "$(SG_SESSION)" ] || { echo "sg-session checkout not found at $(SG_SESSION)"; exit 2; }
@@ -150,3 +150,11 @@ test-glassframe: build
 test-animbg: build
 	@sh test/animbg-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc
 	@sh test/animbg-gate.sh --mutants; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc
+
+# A pen drives the pointer (a Surface's pen, a drawing tablet): a test build
+# (-Dtest-tablet=true, build-pen/) feeds a pen from a FIFO; the mutant build
+# (SG_MUTANT_TABLET, build-pen-mutant/) must fail.
+.PHONY: test-pen
+test-pen:
+	@sh test/pen-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || [ $$rc -eq 0 ] || exit $$rc; \
+	 sh test/pen-gate.sh --mutant >/dev/null 2>&1; rc=$$?; [ $$rc -eq 1 ] || { echo "pen-gate: the mutant was not caught ($$rc)"; exit 1; }

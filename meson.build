@@ -18,6 +18,11 @@ add_project_arguments(
   language: 'c',
 )
 
+# sg-compositor: test builds' pen (test/pen-gate.sh), never in a package
+if get_option('test-tablet')
+  add_project_arguments('-DSG_TEST_TABLET', language : 'c')
+endif
+
 if get_option('buildtype').startswith('debug')
   add_project_arguments('-DDEBUG', language : 'c')
 endif

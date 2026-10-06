@@ -255,3 +255,19 @@ once. The gate unsets DISPLAY and the fixture refuses `:0` or none.
 David's call that MIT is fine for components, and one licence avoids
 mixed-licence files. cage's copyright notices stay on its files;
 `debian/copyright` names both.
+
+### Pens (tablet tools)
+
+A pen (a Surface's through iptsd, a drawing tablet) **drives the pointer**:
+`handle_new_tablet` attaches it to the cursor; its motion and proximity warp
+the cursor (`process_cursor_motion`, so the lock and decor guards apply), its
+tip is BTN_LEFT and its barrel buttons BTN_RIGHT/BTN_MIDDLE through
+`seat_pointer_button` (the mouse's own path); a seat with only a pen has the
+pointer capability. Pressure and tilt are not passed on (Wine's programs take
+a mouse). Console pens are ignored while the session is remote, as the console
+pointer is. Touch was already a click (wl_touch to Xwayland; wine-sg 0783 lets
+the X server emulate the pointer). **`make test-pen`** (`test/pen-gate.sh`):
+a test build (`-Dtest-tablet=true`, never packaged) reads a pen's events from
+`SG_TEST_TABLET_FIFO` and emits them as a real tablet device's; xev must see
+motion, button 1 from the tip, button 3 from the barrel, a held-button stroke;
+the mutant build (`SG_MUTANT_TABLET`) must fail.
