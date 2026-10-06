@@ -57,7 +57,6 @@
 #else
 #define DEFAULT_BUTTON_W 30
 #endif
-#define TASKBAR_H 40 /* the shell's taskbar, at the bottom: a maximized window stops above it */
 #define ICON_PX 16   /* the program's icon at the bar's left, as Wine's windows have theirs */
 #define DOUBLE_CLICK_MS 400
 
@@ -72,7 +71,9 @@ static struct {
 	int border;   /* the frame's thickness, its outer line included */
 	int scale8;   /* the screen's scale, in eighths */
 	int glass;    /* the Glass frame's opacity in percent (0: opaque) */
-} conf = {LOOK_CLASSIC, 0, DEFAULT_BUTTON_W, 0, 1, 8, 0};
+	int taskbar;  /* the shell's taskbar's height (0: 40 px) */
+	int cursor;   /* the pointer's size (0: the screen's own) */
+} conf = {LOOK_CLASSIC, 0, DEFAULT_BUTTON_W, 0, 1, 8, 0, 0, 0};
 
 static void
 read_conf(void)
@@ -95,6 +96,7 @@ read_conf(void)
 		if (had) {
 			conf.look = LOOK_CLASSIC; conf.caption = 0; conf.button = DEFAULT_BUTTON_W;
 			conf.buttonh = 0; conf.border = 1; conf.scale8 = 8; conf.glass = 0;
+			conf.taskbar = 0; conf.cursor = 0;
 		}
 		had = false;
 		return;
@@ -106,6 +108,7 @@ read_conf(void)
 	had = true;
 	conf.look = LOOK_CLASSIC; conf.caption = 0; conf.button = DEFAULT_BUTTON_W;
 	conf.buttonh = 0; conf.border = 1; conf.scale8 = 8; conf.glass = 0;
+	conf.taskbar = 0; conf.cursor = 0;
 	if (!(f = fopen(path, "r"))) {
 		return;
 	}
@@ -132,6 +135,10 @@ read_conf(void)
 			conf.scale8 = n;
 		} else if (!strcmp(line, "glass") && n >= 0 && n < 100) {
 			conf.glass = n;
+		} else if (!strcmp(line, "taskbar") && n >= 20 && n <= 400) {
+			conf.taskbar = n;
+		} else if (!strcmp(line, "cursor") && n >= 16 && n <= 256) {
+			conf.cursor = n;
 		}
 	}
 	fclose(f);
@@ -147,6 +154,27 @@ decor_title_h(void)
 {
 	read_conf();
 	return conf.caption ? conf.border - 1 + conf.caption : 32;
+}
+
+/* the taskbar's height at the display scale (David 2026-10-05: on a
+ * 2736x1824 screen at 175% it is 70 px; a maximized Linux window stopped 40
+ * px from the bottom, under it) */
+int
+decor_taskbar_h(void)
+{
+	read_conf();
+#ifndef SG_MUTANT_TASKBAR_FIXED
+	return conf.taskbar ? conf.taskbar : 40;
+#else
+	return 40;
+#endif
+}
+
+int
+decor_cursor_size(void)
+{
+	read_conf();
+	return conf.cursor;
 }
 
 static int button_w(void) { return conf.button; }
@@ -960,7 +988,7 @@ toggle_maximize(struct cg_decor *d)
 		view_get_layout_box(view, &box);
 		view->maximized = true;
 		wlr_xwayland_surface_set_maximized(xs, true);
-		move_view(view, box.x + body_w(), box.y + decor_title_h(), box.width - 2 * body_w(), box.height - decor_title_h() - body_w() - TASKBAR_H);
+		move_view(view, box.x + body_w(), box.y + decor_title_h(), box.width - 2 * body_w(), box.height - decor_title_h() - body_w() - decor_taskbar_h());
 	} else {
 		view->maximized = false;
 		wlr_xwayland_surface_set_maximized(xs, false);

@@ -124,6 +124,10 @@ test-jumpclick: build
 test-bigwindow: build
 	@SG_COMPOSITOR_BIN=$(CURDIR)/$(BUILD)/sg-compositor sh test/bigwindow-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc
 
+.PHONY: test-hidpi
+test-hidpi: build
+	@SG_COMPOSITOR_BIN=$(CURDIR)/$(BUILD)/sg-compositor sh test/hidpi-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc
+
 .PHONY: test-xfloat
 test-xfloat: build
 	@SG_COMPOSITOR_BIN=$(CURDIR)/$(BUILD)/sg-compositor sh test/xfloat-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc

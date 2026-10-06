@@ -1,3 +1,18 @@
+sg-compositor (0.2.0+sg38) unstable; urgency=medium
+
+  * High-resolution screens (David 2026-10-05, a Surface Pro 7 at
+    2736x1824: everything tiny). The pointer is the display scale's share
+    of 24 px: Settings' size (effects.conf cursor=, sg-shell 0.1.0-127),
+    else -- the login screen, Setup -- the screen's recommended scale's (the
+    shorter side over 1080 in 25% steps: 42 px at 2736x1824); Xwayland's
+    own pointer goes with it. A maximized Linux window stops above the
+    taskbar at its scaled height (effects.conf taskbar=, 70 px at 175%); a
+    fixed 40 px strip let it cover the bar. At 1080p nothing changes.
+    Test: test/hidpi-gate.sh (make test-hidpi; mutants
+    SG_MUTANT_CURSOR_FIXED, SG_MUTANT_TASKBAR_FIXED).
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Mon, 05 Oct 2026 20:00:00 -0700
+
 sg-compositor (0.2.0+sg37) unstable; urgency=medium
 
   * A pen drives the pointer (David 2026-10-05, a Surface Pro 7): tablet

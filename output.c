@@ -343,6 +343,10 @@ handle_new_output(struct wl_listener *listener, void *data)
 	if (wlr_output_commit_state(wlr_output, &state)) {
 		output_layout_add_auto(output);
 	}
+	/* the pointer at the new screen's scale (seat.c) */
+	if (server->seat) {
+		seat_update_cursor_size(server->seat, true);
+	}
 
 	view_position_all(output->server);
 	update_output_manager_config(output->server);

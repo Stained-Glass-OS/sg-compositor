@@ -6,6 +6,7 @@
 #include <wlr/types/wlr_data_device.h>
 #include <wlr/types/wlr_input_device.h>
 #include <wlr/types/wlr_seat.h>
+#include <time.h>
 #include <wlr/types/wlr_xcursor_manager.h>
 
 #include "server.h"
@@ -34,6 +35,9 @@ struct cg_seat {
 
 	struct wlr_cursor *cursor;
 	struct wlr_xcursor_manager *xcursor_manager;
+	int cursor_size;              /* the xcursor_manager's size */
+	bool xwayland_cursor;         /* Xwayland's own pointer was given that size */
+	struct timespec cursor_checked; /* when the size was last looked at */
 	struct wl_listener cursor_motion_relative;
 	struct wl_listener cursor_motion_absolute;
 	struct wl_listener cursor_button;
@@ -123,5 +127,12 @@ void seat_destroy(struct cg_seat *seat);
 struct cg_view *seat_get_focus(struct cg_seat *seat);
 void seat_set_focus(struct cg_seat *seat, struct cg_view *view);
 void seat_center_cursor(struct cg_seat *seat);
+/* The pointer's size: Settings' (effects.conf cursor=), else the screen's
+ * recommended scale's share of 24 px; force: look now (an output changed),
+ * else at most once a second. */
+void seat_update_cursor_size(struct cg_seat *seat, bool force);
+/* the recommended display scale for a WxH screen, in percent: the shorter
+ * side over 1080 in 25% steps, 100% to 400% (sg-shell's scale_for_screen) */
+int scale_for_screen(int w, int h);
 
 #endif

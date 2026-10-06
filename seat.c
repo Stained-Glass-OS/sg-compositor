@@ -960,6 +960,88 @@ handle_cursor_button(struct wl_listener *listener, void *data)
 	seat_pointer_button(seat, &event->pointer->base, event->time_msec, event->button, event->state);
 }
 
+int
+scale_for_screen(int w, int h)
+{
+	int s = w < h ? w : h, q;
+	if (s <= 0) {
+		return 100;
+	}
+	q = (s * 4 + 540) / 1080;
+	return (q < 4 ? 4 : q > 16 ? 16 : q) * 25;
+}
+
+/* sg-compositor: the pointer at the display scale (David 2026-10-05: on a
+ * Surface Pro 7, 2736x1824, everything was tiny -- the pointer too). The
+ * size Settings gives (effects.conf, the user's scale), else, before
+ * anyone signs in (the login screen, Setup), the screen's recommended
+ * scale's share of 24 px. The X server's own pointer (over a window that
+ * sets none) goes with it. */
+void
+seat_update_cursor_size(struct cg_seat *seat, bool force)
+{
+	struct timespec now;
+	struct wlr_xcursor_manager *mgr;
+	struct cg_output *output;
+	int size = 0, h = 0, w = 0;
+
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	if (!force && now.tv_sec == seat->cursor_checked.tv_sec) {
+		return;
+	}
+	seat->cursor_checked = now;
+#if CAGE_HAS_XWAYLAND
+	size = decor_cursor_size();
+#endif
+	if (!size) {
+		wl_list_for_each (output, &seat->server->outputs, link) {
+			if (output->wlr_output->height > h) {
+				w = output->wlr_output->width;
+				h = output->wlr_output->height;
+			}
+		}
+		size = XCURSOR_SIZE * scale_for_screen(w, h) / 100;
+	}
+#ifdef SG_MUTANT_CURSOR_FIXED
+	size = XCURSOR_SIZE;
+#endif
+	if (size == seat->cursor_size && seat->xcursor_manager && seat->xwayland_cursor) {
+		return;
+	}
+	if (size == seat->cursor_size && seat->xcursor_manager) {
+		mgr = seat->xcursor_manager;
+		goto xwayland;
+	}
+	if (!(mgr = wlr_xcursor_manager_create(NULL, size))) {
+		return;
+	}
+	wl_list_for_each (output, &seat->server->outputs, link) {
+		wlr_xcursor_manager_load(mgr, output->wlr_output->scale);
+	}
+	wlr_xcursor_manager_load(mgr, 1);
+	if (seat->xcursor_manager) {
+		wlr_xcursor_manager_destroy(seat->xcursor_manager);
+	}
+	seat->xcursor_manager = mgr;
+	seat->cursor_size = size;
+	wlr_log(WLR_INFO, "pointer size %d", size);
+	if (!seat->seat->pointer_state.focused_surface) {
+		wlr_cursor_set_xcursor(seat->cursor, mgr, DEFAULT_XCURSOR);
+	}
+xwayland:
+	seat->xwayland_cursor = true;
+#if CAGE_HAS_XWAYLAND
+	if (seat->server->xwayland) {
+		struct wlr_xcursor *xcursor = wlr_xcursor_manager_get_xcursor(mgr, DEFAULT_XCURSOR, 1);
+		if (xcursor) {
+			struct wlr_xcursor_image *image = xcursor->images[0];
+			wlr_xwayland_set_cursor(seat->server->xwayland, image->buffer, image->width * 4, image->width,
+						image->height, image->hotspot_x, image->hotspot_y);
+		}
+	}
+#endif
+}
+
 static void
 process_cursor_motion(struct cg_seat *seat, uint32_t time_msec, double dx, double dy, double dx_unaccel,
 		      double dy_unaccel)
@@ -968,6 +1050,7 @@ process_cursor_motion(struct cg_seat *seat, uint32_t time_msec, double dx, doubl
 	struct wlr_seat *wlr_seat = seat->seat;
 	struct wlr_surface *surface = NULL;
 
+	seat_update_cursor_size(seat, false);
 	/* sg-compositor: an elevated window being moved or resized by the user
 	 * takes the motion; the window under the pointer does not see it. */
 	if (elevated_grab_motion(seat, seat->cursor->x, seat->cursor->y)) {
@@ -1404,6 +1487,7 @@ seat_create(struct cg_server *server, struct wlr_backend *backend)
 
 	if (!seat->xcursor_manager) {
 		seat->xcursor_manager = wlr_xcursor_manager_create(NULL, XCURSOR_SIZE);
+		seat->cursor_size = XCURSOR_SIZE;
 		if (!seat->xcursor_manager) {
 			wlr_log(WLR_ERROR, "Cannot create XCursor manager");
 			wlr_cursor_destroy(seat->cursor);

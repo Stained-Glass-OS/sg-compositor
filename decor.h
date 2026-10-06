@@ -17,7 +17,14 @@ void decor_create(struct cg_view *view);
 void decor_destroy(struct cg_view *view);
 /* the view has our title bar */
 bool decor_has(struct cg_view *view);
-#define DECOR_TASKBAR_H 40 /* the shell's taskbar: a maximized window stops above it */
+/* the shell's taskbar's height: a maximized window stops above it -- as
+ * Settings' effects.conf gives it (taskbar=: 40 px at 100%, 70 at 175%),
+ * else 40 */
+int decor_taskbar_h(void);
+#define DECOR_TASKBAR_H decor_taskbar_h()
+/* the pointer's size Settings' effects.conf gives (cursor=: 24 px at 100%,
+ * the display scale's share), or 0 */
+int decor_cursor_size(void);
 void decor_set_active(struct cg_view *view, bool active);
 void decor_set_fullscreen(struct cg_view *view, bool fullscreen);
 
