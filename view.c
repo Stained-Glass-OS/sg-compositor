@@ -218,6 +218,14 @@ view_unmap(struct cg_view *view)
 		view->server->seat->grab_view = NULL;
 	}
 	wlr_scene_node_destroy(&view->scene_tree->node);
+#ifndef SG_MUTANT_UNMAP_DANGLING_TREE
+	/* sg-compositor: gone with it -- every "if (view->scene_tree)" after
+	   this (a hidden X window asking to be moved, a lock, the taskbar's
+	   hold) used freed memory: a Wine message box closing at 2736x1824
+	   took the login screen's compositor down in scene_node_get_root
+	   (regression walk 2026-10-06) */
+	view->scene_tree = NULL;
+#endif
 
 	view->wlr_surface->data = NULL;
 	view->wlr_surface = NULL;

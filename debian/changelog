@@ -1,3 +1,19 @@
+sg-compositor (0.2.0+sg41) unstable; urgency=medium
+
+  * A window hidden and then asked to move no longer takes the compositor
+    down: view_unmap destroyed the view's scene tree but kept the pointer,
+    and every "if (view->scene_tree)" afterwards used freed memory. A
+    managed X window asking to be configured while unmapped -- a Wine
+    message box closing (Setup's "additional partitions" box at
+    2736x1824, s14 regression walk 2026-10-06) -- crashed the login
+    screen's compositor in libwlroots scene_node_get_root (backtrace:
+    request_configure -> view_position -> view_center). Old code (cage's
+    view_unmap, sg-compositor's scene_tree checks), not the pen work.
+    Test: test/unmapcfg-gate.sh (make test-unmapcfg; mutant
+    SG_MUTANT_UNMAP_DANGLING_TREE crashes every run).
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Tue, 06 Oct 2026 09:54:03 -0700
+
 sg-compositor (0.2.0+sg40) unstable; urgency=medium
 
   * A pen lifted out of range is told to X programs: the root window's
