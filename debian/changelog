@@ -1,3 +1,15 @@
+sg-compositor (0.2.0+sg42) unstable; urgency=medium
+
+  * A Linux program's Horizon and Glass caption buttons are drawn smooth:
+    the close button's cross by each pixel's share of its two strokes, the
+    buttons' and the title bar's rounded corners by each pixel's share of
+    the outline (4 x 4 samples), instead of stepped pixel by pixel (David
+    2026-10-06: every icon we draw at a better resolution). Test:
+    test/decorsmooth-gate.sh (make test-decorsmooth; mutant
+    SG_MUTANT_JAGGED_DECOR).
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Tue, 06 Oct 2026 10:26:33 -0700
+
 sg-compositor (0.2.0+sg41) unstable; urgency=medium
 
   * A window hidden and then asked to move no longer takes the compositor

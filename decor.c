@@ -618,6 +618,25 @@ draw_era_button(struct pixels *p, int w, int x0, int y0, int bw, int bh, const s
 		for (int x = 0; x < bw; x++) {
 			int dx = x < r ? r - x : x >= bw - r ? x - (bw - r - 1) : 0;
 			int dy = y < r ? r - y : y >= bh - r ? y - (bh - r - 1) : 0;
+#ifndef SG_MUTANT_JAGGED_DECOR
+			if (dx && dy) {
+				/* a corner: the share of the pixel (4 x 4 samples) inside the
+				 * rounded outline, and inside its one-pixel rim, blended in --
+				 * soft corners, not stepped ones */
+				float cx = x < r ? r : bw - r, cy = y < r ? r : bh - r;
+				unsigned out = 0, in = 0;
+				for (int sy = 0; sy < 4; sy++) {
+					for (int sx = 0; sx < 4; sx++) {
+						float fx = x + (sx + 0.5f) / 4 - cx, fy = y + (sy + 0.5f) / 4 - cy, d2 = fx * fx + fy * fy;
+						out += d2 <= (float) r * r;
+						in += d2 <= (float) (r - 1) * (r - 1);
+					}
+				}
+				blend(p, w, x0 + x, y0 + y, 0xff000000 | edge, out * 255 / 16);
+				blend(p, w, x0 + x, y0 + y, c, in * 255 / 16);
+				continue;
+			}
+#endif
 			if (dx * dx + dy * dy > r * r) {
 				continue;
 			}
@@ -627,17 +646,52 @@ draw_era_button(struct pixels *p, int w, int x0, int y0, int bw, int bh, const s
 	}
 }
 
+#ifndef SG_MUTANT_JAGGED_DECOR
+/* the share (0..16) of pixel (px, py)'s 4 x 4 samples within half of the
+ * segment (ax, ay)-(bx, by) */
+static unsigned
+seg_cover(int px, int py, float ax, float ay, float bx, float by, float half)
+{
+	float vx = bx - ax, vy = by - ay, len2 = vx * vx + vy * vy;
+	unsigned n = 0;
+	for (int sy = 0; sy < 4; sy++) {
+		for (int sx = 0; sx < 4; sx++) {
+			float fx = px + (sx + 0.5f) / 4 - ax, fy = py + (sy + 0.5f) / 4 - ay;
+			float t = len2 > 0 ? (fx * vx + fy * vy) / len2 : 0;
+			t = t < 0 ? 0 : t > 1 ? 1 : t;
+			float ex = fx - t * vx, ey = fy - t * vy;
+			n += ex * ex + ey * ey <= half * half;
+		}
+	}
+	return n;
+}
+#endif
+
 /* a glyph: a cross, a box, two boxes, a line; in a g x g square at (x, y) */
 static void
 draw_glyph(struct pixels *p, int w, enum part part, bool maximized, int x, int y, int g, int lw, uint32_t c)
 {
 	if (part == PART_CLOSE) {
+#ifndef SG_MUTANT_JAGGED_DECOR
+		/* two strokes corner to corner, as heavy as the old ones (lw pixels
+		 * across), each pixel by its share of them: a smooth cross */
+		float a = lw / 2.0f, half = lw * 0.5f + 0.15f;
+		for (int py = y - 1; py <= y + g + 1; py++) {
+			for (int px = x - 1; px <= x + g + lw + 1; px++) {
+				unsigned n1 = seg_cover(px, py, x + a, y + 0.5f, x + g + a, y + g + 0.5f, half);
+				unsigned n2 = seg_cover(px, py, x + g + a, y + 0.5f, x + a, y + g + 0.5f, half);
+				unsigned n = n1 > n2 ? n1 : n2;
+				blend(p, w, px, py, c, n * 255 / 16);
+			}
+		}
+#else
 		for (int i = 0; i <= g; i++) {
 			for (int k = 0; k < lw; k++) {
 				put(p, w, x + i + k, y + i, c);
 				put(p, w, x + g - i + k, y + i, c);
 			}
 		}
+#endif
 	} else if (part == PART_MAX && !maximized) {
 		for (int i = 0; i <= g; i++) {
 			put(p, w, x + i, y + g, c);
@@ -764,10 +818,26 @@ render(struct cg_decor *d)
 		for (int x = 0; x < w; x++) {
 			uint32_t a = alpha;
 			if (round && y < round) {
-				int dx = x < round ? round - x : x >= w - round ? x - (w - round - 1) : 0, dy = round - y;
+				int dx = x < round ? round - x : x >= w - round ? x - (w - round - 1) : 0;
+#ifndef SG_MUTANT_JAGGED_DECOR
+				if (dx) {
+					/* the share of the pixel inside the rounded corner: soft */
+					float cx = x < round ? round : w - round;
+					unsigned in = 0;
+					for (int sy = 0; sy < 4; sy++) {
+						for (int sx = 0; sx < 4; sx++) {
+							float fx = x + (sx + 0.5f) / 4 - cx, fy = y + (sy + 0.5f) / 4 - round;
+							in += fx * fx + fy * fy <= (float) round * round;
+						}
+					}
+					a = a * in / 16;
+				}
+#else
+				int dy = round - y;
 				if (dx && dx * dx + dy * dy > round * round) {
 					a = 0;
 				}
+#endif
 			}
 			if (a != 255) {
 				uint32_t c = p->data[y * w + x];   /* premultiplied */
