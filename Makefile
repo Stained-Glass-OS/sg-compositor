@@ -18,7 +18,7 @@ install: build
 # The gate is sg-session's own session gate, run with this compositor hosting
 # the session instead of cage. Milestone 1 of ADR 0011 is exactly "that still
 # passes", so the gate is the same one, not a new one.
-test: test-session test-lock test-secure test-secure-dim test-xwindows test-privileged test-sas test-power test-elevated test-popup test-backdrop test-xfloat test-decor test-decorlook test-decorsmooth test-capture test-wmreq test-jumpclick test-bigwindow test-desktopfront test-selfmove test-deskcomp test-glassframe test-animbg test-embedfocus test-pen test-unmapcfg
+test: test-session test-lock test-secure test-secure-dim test-xwindows test-privileged test-sas test-power test-elevated test-popup test-backdrop test-xfloat test-decor test-decorlook test-decorsmooth test-capture test-wmreq test-jumpclick test-bigwindow test-desktopfront test-selfmove test-deskcomp test-bgpart test-glassframe test-animbg test-embedfocus test-pen test-unmapcfg
 
 test-session: build
 	@[ -d "$(SG_SESSION)" ] || { echo "sg-session checkout not found at $(SG_SESSION)"; exit 2; }
@@ -142,6 +142,13 @@ test-xfloat: build
 test-deskcomp: build
 	@sh test/deskcomp-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc
 	@sh test/deskcomp-gate.sh --mutants; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc
+
+# sg-deskcomp shows a part of the desktop's picture drawn again in place (a
+# rubber band, a lit icon: wine-sg 1260), and its mutant.
+.PHONY: test-bgpart
+test-bgpart: build
+	@sh test/bgpart-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc
+	@sh test/bgpart-gate.sh --mutants; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc
 
 # The Linux programs' title bars in the Wine frames' look and sizes
 # (effects.conf), and a new one held back while the taskbar frames them.

@@ -103,6 +103,10 @@ static Visual *visual;
 static int depth;
 static XRenderPictFormat *format, *argb_format, *a8_format;
 static Picture canvas_pict, buffer_pict, bg_pict, black_pict;
+/* the desktop's picture changes in place (wine-sg 1260: a rubber band, an
+ * icon lit under the pointer, drawn into it as the mouse moves): its damage */
+static Damage bg_damage;
+static Pixmap icon_mask_pixmap;    /* icon_mask's, kept to update parts of it */
 /* the same buffer, never clipped: what the frost reads (see blur_below) */
 static Picture buffer_read;
 static Pixmap buffer_pixmap;
@@ -1028,7 +1032,7 @@ static Picture radial(int x, int y, int r, int n, const double *at, const unsign
 	return p;
 }
 
-static Picture make_mask(int w, int h, unsigned char *data)
+static Picture make_mask(int w, int h, unsigned char *data, Pixmap *keep)
 {
 	Pixmap pm = XCreatePixmap(dpy, desktop, w, h, 8);
 	XImage *img = XCreateImage(dpy, DefaultVisual(dpy, DefaultScreen(dpy)), 8, ZPixmap, 0, (char *)data, w, h, 32, (w + 3) & ~3);
@@ -1038,7 +1042,7 @@ static Picture make_mask(int w, int h, unsigned char *data)
 	XFreeGC(dpy, gc);
 	XDestroyImage(img);   /* frees data */
 	p = XRenderCreatePicture(dpy, pm, a8_format, 0, NULL);
-	XFreePixmap(dpy, pm);
+	if (keep) *keep = pm; else XFreePixmap(dpy, pm);
 	return p;
 }
 
@@ -1049,7 +1053,9 @@ static void load_wallpaper(void)
 	XImage *a = NULL, *b = NULL;
 	if (wp_pict) XRenderFreePicture(dpy, wp_pict);
 	if (icon_mask) XRenderFreePicture(dpy, icon_mask);
+	if (icon_mask_pixmap) XFreePixmap(dpy, icon_mask_pixmap);
 	wp_pict = icon_mask = 0;
+	icon_mask_pixmap = 0;
 	free_glow();
 	if (!wp || !dp || opt_background == BG_STATIC) return;
 	trapped = 0;
@@ -1071,7 +1077,7 @@ static void load_wallpaper(void)
 								if (yy >= 0 && yy < dh && xx >= 0 && xx < dw) m[(size_t)yy * stride + xx] = 255;
 					}
 			}
-			icon_mask = make_mask(dw, dh, m);
+			icon_mask = make_mask(dw, dh, m, &icon_mask_pixmap);
 			trapped = 0;
 			wp_pict = XRenderCreatePicture(dpy, wp, format, 0, NULL);
 			XSync(dpy, False);
@@ -1080,6 +1086,55 @@ static void load_wallpaper(void)
 	}
 	if (a) XDestroyImage(a);
 	if (b) XDestroyImage(b);
+}
+
+/* a part of the desktop's picture drawn again: where the icons are, in it
+ * and a pixel round it, found again (the animated background draws the
+ * picture only there) */
+static void update_icon_mask(int x, int y, int w, int h)
+{
+	Pixmap wp = prop_card(desktop, atom_wppixmap, XA_PIXMAP, 0), dp = prop_card(desktop, atom_bgpixmap, XA_PIXMAP, 0);
+	XImage *a = NULL, *b = NULL, *img;
+	int x0, y0, x1, y1;
+	unsigned char *m;
+	GC gc;
+
+	if (!icon_mask_pixmap || !wp || !dp) return;
+	x0 = x - 1 < 0 ? 0 : x - 1; y0 = y - 1 < 0 ? 0 : y - 1;
+	x1 = x + w + 1 > dw ? dw : x + w + 1; y1 = y + h + 1 > dh ? dh : y + h + 1;
+	if (x1 <= x0 || y1 <= y0) return;
+	/* the pixels round the part, one more each way: a pixel's mark spreads one */
+	{
+		int gx0 = x0 - 1 < 0 ? 0 : x0 - 1, gy0 = y0 - 1 < 0 ? 0 : y0 - 1;
+		int gx1 = x1 + 1 > dw ? dw : x1 + 1, gy1 = y1 + 1 > dh ? dh : y1 + 1;
+		int gw = gx1 - gx0, gh = gy1 - gy0, ow = x1 - x0, oh = y1 - y0, stride = (ow + 3) & ~3;
+		trapped = 0;
+		a = XGetImage(dpy, wp, gx0, gy0, gw, gh, AllPlanes, ZPixmap);
+		b = XGetImage(dpy, dp, gx0, gy0, gw, gh, AllPlanes, ZPixmap);
+		XSync(dpy, False);
+		if (trapped || !a || !b || a->bits_per_pixel != 32 || b->bits_per_pixel != 32 || !(m = calloc(1, (size_t)stride * oh))) {
+			if (a) XDestroyImage(a);
+			if (b) XDestroyImage(b);
+			return;
+		}
+		for (int yy = gy0; yy < gy1; yy++) {
+			const uint32_t *ra = (const uint32_t *)(a->data + (size_t)(yy - gy0) * a->bytes_per_line);
+			const uint32_t *rb = (const uint32_t *)(b->data + (size_t)(yy - gy0) * b->bytes_per_line);
+			for (int xx = gx0; xx < gx1; xx++) {
+				if (!((ra[xx - gx0] ^ rb[xx - gx0]) & 0xffffff)) continue;
+				for (int py = yy - 1; py <= yy + 1; py++)
+					for (int px = xx - 1; px <= xx + 1; px++)
+						if (py >= y0 && py < y1 && px >= x0 && px < x1) m[(size_t)(py - y0) * stride + (px - x0)] = 255;
+			}
+		}
+		XDestroyImage(a);
+		XDestroyImage(b);
+		img = XCreateImage(dpy, DefaultVisual(dpy, DefaultScreen(dpy)), 8, ZPixmap, 0, (char *)m, ow, oh, 32, stride);
+		gc = XCreateGC(dpy, icon_mask_pixmap, 0, NULL);
+		XPutImage(dpy, icon_mask_pixmap, gc, img, 0, 0, x0, y0, ow, oh);
+		XFreeGC(dpy, gc);
+		XDestroyImage(img);   /* frees m */
+	}
 }
 
 /* battery saver: on battery below 20 % (as Windows' battery saver comes on) */
@@ -1696,17 +1751,33 @@ static Window find_desktop(Window w, int level)
 	return found;
 }
 
+static void forget_bg_damage(void)
+{
+	if (!bg_damage) return;
+	trapped = 0;
+	XDamageDestroy(dpy, bg_damage);   /* gone with its pixmap, maybe: trapped */
+	XSync(dpy, False);
+	bg_damage = 0;
+}
+
 static void load_background(void)
 {
 	Pixmap pm = prop_card(desktop, atom_bgpixmap, XA_PIXMAP, 0);
 	if (bg_pict) XRenderFreePicture(dpy, bg_pict);
 	bg_pict = 0;
+	forget_bg_damage();
 	free_glow();
 	if (!pm) return;
 	trapped = 0;
 	bg_pict = XRenderCreatePicture(dpy, pm, format, 0, NULL);
 	XSync(dpy, False);
-	if (trapped) bg_pict = 0;
+	if (trapped) { bg_pict = 0; return; }
+#ifndef SG_MUTANT_NO_BG_DAMAGE
+	/* drawn into in place: those parts painted again */
+	bg_damage = XDamageCreate(dpy, pm, XDamageReportNonEmpty);
+	XSync(dpy, False);
+	if (trapped) bg_damage = 0;
+#endif
 }
 
 static void setup_canvas(void)
@@ -1765,6 +1836,7 @@ static void detach(void)
 {
 	while (nwins) { wins[0].damage = 0; forget(&wins[0]); }
 	free_glow();
+	forget_bg_damage();
 	if (bg_pict) XRenderFreePicture(dpy, bg_pict);
 	if (buffer_pict) XRenderFreePicture(dpy, buffer_pict);
 	if (buffer_read) XRenderFreePicture(dpy, buffer_read);
@@ -1918,7 +1990,17 @@ int main(int argc, char **argv)
 				XDamageNotifyEvent *de = (XDamageNotifyEvent *)&e;
 				XserverRegion parts = XFixesCreateRegion(dpy, NULL, 0);
 				XDamageSubtract(dpy, de->damage, None, parts);
-				if ((w = find(de->drawable)) && !w->wobbling) {
+				if (bg_damage && de->damage == bg_damage) {
+					/* the desktop's picture, in the desktop's coordinates */
+					XFixesUnionRegion(dpy, damage_all, damage_all, parts);
+					if (icon_mask) {
+						XRectangle *box = NULL;
+						int nbox = 0;
+						XRectangle bounds;
+						if ((box = XFixesFetchRegionAndBounds(dpy, parts, &nbox, &bounds))) XFree(box);
+						if (nbox) update_icon_mask(bounds.x, bounds.y, bounds.width, bounds.height);
+					}
+				} else if ((w = find(de->drawable)) && !w->wobbling) {
 					XFixesTranslateRegion(dpy, parts, w->x + w->bw, w->y + w->bw);
 					XFixesUnionRegion(dpy, damage_all, damage_all, parts);
 				} else if (w)
