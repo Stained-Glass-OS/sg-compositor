@@ -23,6 +23,7 @@
 #include "seat.h"
 #include "server.h"
 #include "view.h"
+#include "wayland_app.h"
 #if CAGE_HAS_XWAYLAND
 #include "xwayland.h"
 #endif
@@ -138,6 +139,13 @@ void
 view_position(struct cg_view *view)
 {
 	struct wlr_box layout_box;
+
+	/* sg-compositor: a program's native Wayland window: in the work area,
+	 * as a window (wayland_app.c), not over the whole screen */
+	if (wayland_app_is(view)) {
+		wayland_app_place(view);
+		return;
+	}
 	view_layout_box(view, &layout_box);
 
 	/* sg-compositor: an X11 window of a Linux program (a terminal) keeps the

@@ -238,6 +238,23 @@ while locked.
 (David's desktop). An adversary run without an explicit DISPLAY typed there
 once. The gate unsets DISPLAY and the fixture refuses `:0` or none.
 
+## Native Wayland windows of programs (`wayland_app.c`, `make test-wlapp`)
+
+Linux programs are meant to be X11 clients (sg-session sets
+`XDG_SESSION_TYPE=x11`, `GDK_BACKEND=x11`, ... for them) so Wine's taskbar can
+frame them. One that still opens an `xdg_toplevel` -- Electron 39+ goes by
+`XDG_SESSION_TYPE` alone, and **wlroots' session code sets it to `wayland`**
+for everything the compositor starts -- is managed here instead of cage's
+full-screen treatment: placed in the work area, clipped at the taskbar strip
+(`wlr_scene_subsurface_tree_set_clip`) unless full screen, moved/resized on
+its own `move`/`resize` requests, listed by `XWINDOWS` under an id with bit 31
+set (X ids are 29 bits, so explorer's embedding simply fails and keeps a
+hidden stand-in) and driven by `XACTIVATE`/`XMINIMIZE`/`XCLOSE`/`XKILL`.
+Privileged clients (lock screen, consent prompt) keep the full-screen window.
+`xdg_wm_base` is version 4 here: never send version-5 events
+(`wm_capabilities`) without checking the client's version -- wlroots asserts,
+and the first build took the session down the moment Claude mapped.
+
 ## Things that will bite you
 
 - **cage does not exit on SIGTERM while its child is stuck.** It stops its

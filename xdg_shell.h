@@ -16,6 +16,20 @@ struct cg_xdg_shell_view {
 	struct wl_listener unmap;
 	struct wl_listener map;
 	struct wl_listener request_fullscreen;
+
+	/* sg-compositor: an ordinary program's window, managed like the
+	 * session's other windows (wayland_app.c) */
+	bool managed;
+	unsigned long window_id; /* its id on the taskbar's list */
+	struct wl_listener request_move;
+	struct wl_listener request_resize;
+	struct wl_listener request_maximize;
+	struct wl_listener request_minimize;
+	bool fullscreen;
+	bool want_maximized, want_fullscreen; /* asked before it mapped */
+	struct wlr_box windowed;              /* where it was before full screen */
+	int last_w, last_h;                   /* the size last placed */
+	int gx, gy;                           /* its geometry's offset when placed */
 };
 
 struct cg_xdg_decoration {

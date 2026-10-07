@@ -140,6 +140,7 @@ cage_sources = [
   'public_capture.c',
   'elevated.c',
   'session_x11.c',
+  'wayland_app.c',
   'cage.c',
   'idle_inhibit_v1.c',
   'output.c',
@@ -161,6 +162,7 @@ cage_headers = [
   'server.h',
   'view.h',
   'xdg_shell.h',
+  'wayland_app.h',
 ]
 
 if conf_data.get('CAGE_HAS_XWAYLAND', 0) == 1

@@ -33,6 +33,7 @@
 #include "seat.h"
 #include "server.h"
 #include "view.h"
+#include "wayland_app.h"
 #include "xwayland.h"
 
 #if CAGE_HAS_XWAYLAND
@@ -67,6 +68,10 @@ find(struct cg_server *server, unsigned long window)
 
 	wl_list_for_each (view, &server->views, link) {
 		if ((xs = program_surface(view)) && xs->window_id == window) {
+			return view;
+		}
+		/* a program's native Wayland window (wayland_app.c) */
+		if (wayland_app_is(view) && wayland_app_window_id(view) == window) {
 			return view;
 		}
 	}
@@ -195,14 +200,30 @@ session_x11_list(struct cg_server *server, char *buf, size_t len)
 
 	wl_list_for_each (view, &server->views, link) {
 		char title[120], class[48];
+		unsigned long id;
 		int n;
 
-		if (!(xs = program_surface(view))) {
+		if ((xs = program_surface(view))) {
+			copy_clean(title, sizeof(title), xs->title);
+			copy_clean(class, sizeof(class), xs->class);
+			id = xs->window_id;
+		} else if (wayland_app_listed(view)) {
+			/* a program's native Wayland window, under an id no X
+			 * window has (wayland_app.c) */
+			char *t = view_get_title(view);
+			copy_clean(title, sizeof(title), t);
+			free(t);
+			copy_clean(class, sizeof(class), wayland_app_class(view));
+			for (char *c = class; *c; c++) {
+				if (*c == ' ') {
+					*c = '_';
+				}
+			}
+			id = wayland_app_window_id(view);
+		} else {
 			continue;
 		}
-		copy_clean(title, sizeof(title), xs->title);
-		copy_clean(class, sizeof(class), xs->class);
-		n = snprintf(buf + off, len - off, "%u %s %s %s\t%s\n", (unsigned) xs->window_id,
+		n = snprintf(buf + off, len - off, "%u %s %s %s\t%s\n", (unsigned) id,
 			     view->minimized ? "minimized" : "shown", view == focus ? "focused" : "-",
 			     class[0] ? class : "-", title);
 		if (n < 0 || (size_t) n >= len - off - 5) {
@@ -221,6 +242,10 @@ session_x11_activate(struct cg_server *server, unsigned long window)
 
 	if (!view) {
 		return false;
+	}
+	if (wayland_app_is(view)) {
+		wayland_app_activate(view);
+		return true;
 	}
 	if (view->minimized) {
 		view->minimized = false;
@@ -311,6 +336,10 @@ session_x11_minimize(struct cg_server *server, unsigned long window)
 	if (!view) {
 		return false;
 	}
+	if (wayland_app_is(view)) {
+		wayland_app_minimize(view);
+		return true;
+	}
 	if (!view->minimized) {
 		view->minimized = true;
 		wlr_xwayland_surface_set_minimized(xwayland_view_from_view(view)->xwayland_surface, true);
@@ -341,6 +370,13 @@ session_x11_kill(struct cg_server *server, unsigned long window, uid_t uid)
 	if (!view) {
 		return false;
 	}
+	if (wayland_app_is(view)) {
+#ifndef SG_MUTANT_XKILL_DEAF
+		return wayland_app_kill(view, uid);
+#else
+		return true;
+#endif
+	}
 	xs = xwayland_view_from_view(view)->xwayland_surface;
 	snprintf(proc, sizeof(proc), "/proc/%d", (int) xs->pid);
 	if (xs->pid <= 1 || xs->pid == getpid() || stat(proc, &st) || st.st_uid != uid) {
@@ -360,6 +396,10 @@ session_x11_close(struct cg_server *server, unsigned long window)
 
 	if (!view) {
 		return false;
+	}
+	if (wayland_app_is(view)) {
+		wayland_app_close(view);
+		return true;
 	}
 	wlr_xwayland_surface_close(xwayland_view_from_view(view)->xwayland_surface);
 	return true;

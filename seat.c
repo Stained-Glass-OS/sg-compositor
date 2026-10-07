@@ -50,6 +50,7 @@
 #include "session_x11.h"
 #include "server.h"
 #include "view.h"
+#include "wayland_app.h"
 #if CAGE_HAS_XWAYLAND
 #include "xwayland.h"
 #endif
@@ -133,6 +134,11 @@ press_cursor_button(struct cg_seat *seat, struct wlr_input_device *device, uint3
 		   it is gone) -- a click then focuses what it lands on. */
 		if (view && (!current || !view_is_transient_for(current, view))) {
 			seat_set_focus(seat, view);
+			/* sg-compositor: a program's native Wayland window clicked
+			 * comes in front of the others (wayland_app.c) */
+			if (wayland_app_is(view) && view->scene_tree) {
+				wlr_scene_node_raise_to_top(&view->scene_tree->node);
+			}
 		}
 	}
 }
@@ -1025,6 +1031,9 @@ seat_pointer_button(struct cg_seat *seat, struct wlr_input_device *device, uint3
 		return;
 	}
 #endif
+	if (state == WL_POINTER_BUTTON_STATE_RELEASED) {
+		wayland_app_grab_end(seat);
+	}
 	elevated_grab_button(seat, state == WL_POINTER_BUTTON_STATE_PRESSED);
 	if (state == WL_POINTER_BUTTON_STATE_PRESSED) {
 		/* sg-compositor: a click on an elevated window, like a key, lets
@@ -1142,6 +1151,12 @@ process_cursor_motion(struct cg_seat *seat, uint32_t time_msec, double dx, doubl
 	struct wlr_surface *surface = NULL;
 
 	seat_update_cursor_size(seat, false);
+	/* sg-compositor: a program's native Wayland window being moved or
+	 * resized (it asked, from its own title bar) takes the motion */
+	if (wayland_app_grab_motion(seat, seat->cursor->x, seat->cursor->y)) {
+		seat_notify_activity(seat->server);
+		return;
+	}
 	/* sg-compositor: an elevated window being moved or resized by the user
 	 * takes the motion; the window under the pointer does not see it. */
 	if (elevated_grab_motion(seat, seat->cursor->x, seat->cursor->y)) {

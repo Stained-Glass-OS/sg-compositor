@@ -16,6 +16,7 @@
 
 #include "server.h"
 #include "view.h"
+#include "wayland_app.h"
 #include "xdg_shell.h"
 
 static void
@@ -189,6 +190,12 @@ handle_xdg_shell_surface_request_fullscreen(struct wl_listener *listener, void *
 {
 	struct cg_xdg_shell_view *xdg_shell_view = wl_container_of(listener, xdg_shell_view, request_fullscreen);
 
+	/* sg-compositor: a program's window goes full screen and comes back */
+	if (wayland_app_is(&xdg_shell_view->view)) {
+		wayland_app_request_fullscreen(&xdg_shell_view->view);
+		return;
+	}
+
 	/**
 	 * Certain clients do not like figuring out their own window geometry if they
 	 * display in fullscreen mode, so we set it here.
@@ -225,11 +232,19 @@ handle_xdg_shell_surface_commit(struct wl_listener *listener, void *data)
 	struct cg_xdg_shell_view *xdg_shell_view = wl_container_of(listener, xdg_shell_view, commit);
 
 	if (!xdg_shell_view->xdg_toplevel->base->initial_commit) {
+		/* sg-compositor: a program's window placed as its size changes */
+		if (wayland_app_is(&xdg_shell_view->view)) {
+			wayland_app_commit(&xdg_shell_view->view);
+		}
 		return;
 	}
 
 	/* When an xdg_surface performs an initial commit, the compositor must
 	 * reply with a configure so the client can map the surface. */
+	if (wayland_app_is(&xdg_shell_view->view)) {
+		wayland_app_initial_configure(&xdg_shell_view->view);
+		return;
+	}
 	view_position(&xdg_shell_view->view);
 }
 
@@ -244,6 +259,7 @@ handle_xdg_shell_surface_destroy(struct wl_listener *listener, void *data)
 	wl_list_remove(&xdg_shell_view->unmap.link);
 	wl_list_remove(&xdg_shell_view->destroy.link);
 	wl_list_remove(&xdg_shell_view->request_fullscreen.link);
+	wayland_app_fini(xdg_shell_view);
 	xdg_shell_view->xdg_toplevel = NULL;
 
 	view_destroy(view);
@@ -286,6 +302,7 @@ handle_new_xdg_toplevel(struct wl_listener *listener, void *data)
 	wl_signal_add(&toplevel->events.request_fullscreen, &xdg_shell_view->request_fullscreen);
 
 	toplevel->base->data = xdg_shell_view;
+	wayland_app_init(xdg_shell_view);
 }
 
 static void

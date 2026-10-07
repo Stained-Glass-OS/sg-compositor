@@ -1,3 +1,26 @@
+sg-compositor (0.2.0+sg44) unstable; urgency=medium
+
+  * A program's native Wayland window is a window (wayland_app.c). The
+    Claude desktop app (Electron 44, which goes by XDG_SESSION_TYPE alone)
+    opened as an xdg_toplevel and got cage's treatment: maximized over the
+    whole screen, taskbar included, no taskbar button, not in Alt+Tab or
+    Task View, not movable, and once the desktop came in front of it no
+    way back but killing it (David 2026-10-06). Now an ordinary client's
+    toplevel opens centred in the work area at its own size (maximized
+    there when larger, or when it asks), is cut off at the taskbar's strip
+    unless full screen, moves and resizes when it asks (its own title
+    bar), maximizes, restores, minimizes and goes full screen; XWINDOWS
+    lists it for the taskbar under an id no X window can have (bit 31),
+    and XACTIVATE, XMINIMIZE, XCLOSE, XKILL and XDESKTOP act on it as on
+    an X11 Linux window -- a taskbar button, Alt+Tab and Task View entries.
+    A click raises it. The lock screen's and consent prompts' privileged
+    clients keep the full-screen window. Test: test/wlapp-gate.sh (make
+    test-wlapp; mutants SG_MUTANT_WAYLAND_UNMANAGED,
+    SG_MUTANT_WAYLAND_OVER_TASKBAR); VM-checked with the Claude desktop app
+    forced onto Wayland.
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Tue, 06 Oct 2026 17:15:00 -0700
+
 sg-compositor (0.2.0+sg43) unstable; urgency=medium
 
   * sg-deskcomp shows a part of the desktop's picture drawn again in place:
