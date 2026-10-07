@@ -45,6 +45,9 @@ struct cg_lock {
 	 * injection, output and gamma control. */
 	const struct wl_global *restricted[16];
 	int n_restricted;
+	/* Of those, the input injection ones (virtual keyboard and pointer):
+	 * a view-only console shadow does not even see them. */
+	const struct wl_global *input_globals[2];
 	/* Screen capture for everyone else (public_capture.c): hidden from the
 	 * privileged clients, which have the real one. */
 	const struct wl_global *public_capture;
@@ -71,6 +74,11 @@ void lock_view_mapped(struct cg_lock *lock, struct cg_view *view);
 
 /* Offer this global only to privileged clients. */
 void lock_restrict_global(struct cg_lock *lock, const struct wl_global *global);
+/* ... and, being input injection, not to a view-only console shadow. */
+void lock_restrict_input_global(struct cg_lock *lock, const struct wl_global *global);
+
+/* Console shadow (E1 pattern A): ends it, if there is one. */
+void shadow_end(struct cg_server *server, const char *why);
 
 void lock_engage(struct cg_lock *lock);
 

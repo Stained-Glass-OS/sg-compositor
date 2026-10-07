@@ -316,8 +316,120 @@ adopt_remote_client(struct cg_lock *lock, int fd)
 	return true;
 }
 
+/* Console shadow (E1 pattern A, the Windows "shadow" / remote assistance
+ * way): Remote Desktop views -- or, with control, views and drives -- this
+ * session where it is. Unlike REMOTE nothing moves: the console keeps its
+ * screen and its input, the session stays as unlocked or locked as it was,
+ * and the remote side captures the console's own output. What the RDP
+ * daemon's root monitor hands over with SHADOW is its end of a socketpair,
+ * adopted as a privileged client; whether the person at the console agreed
+ * (another user's request) the monitor settled before asking, through the
+ * broker's prompt on the secure surface.
+ *
+ * View only is enforced here, not by the daemon: the shadow's connection is
+ * not even offered the virtual keyboard and pointer (global_filter). While
+ * it lasts, a frame round the screen -- over everything, a lock screen too
+ * -- tells whoever is at the console. When the connection closes, the frame
+ * goes and nothing else changes. Ctrl+Alt+Del at the console ends it
+ * (seat.c). */
+static void
+shadow_frame_show(struct cg_server *server, bool on)
+{
+	struct wlr_box box = {0};
+	const int t = 5; /* thickness */
+
+	if (!server->shadow_frame_tree) {
+		return;
+	}
+	if (on) {
+		wlr_output_layout_get_box(server->output_layout, NULL, &box);
+		if (wlr_box_empty(&box)) {
+			box.width = box.height = 2 * t + 1;
+		}
+		wlr_scene_node_set_position(&server->shadow_frame[0]->node, box.x, box.y);
+		wlr_scene_rect_set_size(server->shadow_frame[0], box.width, t);
+		wlr_scene_node_set_position(&server->shadow_frame[1]->node, box.x, box.y + box.height - t);
+		wlr_scene_rect_set_size(server->shadow_frame[1], box.width, t);
+		wlr_scene_node_set_position(&server->shadow_frame[2]->node, box.x, box.y + t);
+		wlr_scene_rect_set_size(server->shadow_frame[2], t, box.height - 2 * t);
+		wlr_scene_node_set_position(&server->shadow_frame[3]->node, box.x + box.width - t, box.y + t);
+		wlr_scene_rect_set_size(server->shadow_frame[3], t, box.height - 2 * t);
+		wlr_scene_node_raise_to_top(&server->shadow_frame_tree->node);
+	}
+	wlr_scene_node_set_enabled(&server->shadow_frame_tree->node, on);
+}
+
+static void
+handle_shadow_client_destroy(struct wl_listener *listener, void *data)
+{
+	struct cg_server *server = wl_container_of(listener, server, shadow_client_destroy);
+	(void) data;
+	wl_list_remove(&server->shadow_client_destroy.link);
+	server->shadow_client = NULL;
+	server->shadow_control = false;
+	shadow_frame_show(server, false);
+	AUDIT("remote view ended");
+}
+
+void
+shadow_end(struct cg_server *server, const char *why)
+{
+	if (!server->shadow_client) {
+		return;
+	}
+	AUDIT("remote view ended by %s", why);
+	wl_client_destroy(server->shadow_client); /* the destroy listener does the rest */
+}
+
+/* SHADOW view|control with the connection's fd. Returns false, having closed
+ * fd, when it cannot: one remote viewer at a time, and not while Remote
+ * Desktop has taken the session over. */
+static bool
+shadow_attach(struct cg_lock *lock, int fd, bool control, char *reply, size_t len)
+{
+	struct cg_server *server = lock->server;
+	struct cg_privileged_client *pc;
+	struct wl_client *client;
+	struct cg_output *output;
+	struct wlr_output *shown = NULL;
+
+	if (server->shadow_client || server->remote_client || server->remote) {
+		close(fd);
+		return false;
+	}
+	if (!(client = wl_client_create(server->wl_display, fd))) {
+		close(fd);
+		return false;
+	}
+	if (!(pc = calloc(1, sizeof(*pc)))) {
+		wl_client_destroy(client);
+		return false;
+	}
+	pc->client = client;
+	pc->destroy.notify = privileged_destroy;
+	wl_client_add_destroy_listener(client, &pc->destroy);
+	wl_list_insert(&lock->privileged, &pc->link);
+	server->shadow_client = client;
+	server->shadow_control = control;
+	server->shadow_client_destroy.notify = handle_shadow_client_destroy;
+	wl_client_add_destroy_listener(client, &server->shadow_client_destroy);
+	shadow_frame_show(server, true);
+	AUDIT("remote view started (%s)", control ? "view and control" : "view only");
+
+	wl_list_for_each (output, &server->outputs, link) {
+		if (output->wlr_output->enabled) {
+			shown = output->wlr_output;
+			break;
+		}
+	}
+	snprintf(reply, len, "OK shadow %s %dx%d %s\n", shown ? shown->name : "-", shown ? shown->width : 0,
+		 shown ? shown->height : 0, control ? "control" : "view");
+	return true;
+}
+
 /* One command per connection: LOCK, UNLOCK, SECURE, RELEASE, SAS <action>, WATCH, STATUS,
- * REMOTE (optionally with the remote connection's fd) or LOCAL. */
+ * REMOTE (optionally with the remote connection's fd), LOCAL, or SHADOW view|control
+ * (with the shadow connection's fd). */
 static int
 handle_control_connection(int fd, uint32_t mask, void *data)
 {
@@ -435,10 +547,24 @@ handle_control_connection(int fd, uint32_t mask, void *data)
 			lock_secure_release(lock);
 			reply = lock->locked ? "OK locked\n" : "OK unlocked\n";
 		}
+	} else if (!strcmp(buf, "SHADOW view") || !strcmp(buf, "SHADOW control")) {
+		if (!uid_may_unlock(lock, uid)) {
+			AUDIT("refused SHADOW from uid %d", (int) uid);
+			reply = "ERR not permitted\n";
+		} else if (passed_fd < 0) {
+			reply = "ERR need a descriptor\n";
+		} else {
+			bool ok = shadow_attach(lock, passed_fd, !strcmp(buf + 7, "control"), remote_reply,
+						sizeof(remote_reply));
+			passed_fd = -1; /* the compositor's now, or closed */
+			reply = ok ? remote_reply : "ERR busy\n";
+		}
 	} else if (!strcmp(buf, "REMOTE")) {
 		if (!uid_may_unlock(lock, uid)) {
 			AUDIT("refused REMOTE from uid %d", (int) uid);
 			reply = "ERR not permitted\n";
+		} else if (lock->server->shadow_client) {
+			reply = "ERR busy\n"; /* being viewed: not taken over as well */
 		} else if (passed_fd >= 0 && !adopt_remote_client(lock, passed_fd)) {
 			passed_fd = -1;
 			reply = "ERR busy\n";
@@ -550,6 +676,11 @@ handle_control_connection(int fd, uint32_t mask, void *data)
 		}
 	} else if (!strcmp(buf, "STATUS")) {
 		reply = lock->secure ? "OK secure\n" : lock->locked ? "OK locked\n" : "OK unlocked\n";
+	} else if (!strcmp(buf, "SHADOWSTATUS")) {
+		/* is someone viewing: for the gate and for a status display */
+		reply = !lock->server->shadow_client ? "OK none\n"
+			: lock->server->shadow_control ? "OK control\n"
+						       : "OK view\n";
 	} else {
 		reply = "ERR unknown command\n";
 	}
@@ -834,6 +965,18 @@ lock_restrict_global(struct cg_lock *lock, const struct wl_global *global)
 	}
 }
 
+void
+lock_restrict_input_global(struct cg_lock *lock, const struct wl_global *global)
+{
+	lock_restrict_global(lock, global);
+	for (int i = 0; i < 2; i++) {
+		if (!lock->input_globals[i]) {
+			lock->input_globals[i] = global;
+			break;
+		}
+	}
+}
+
 /* Decides which globals a client can even see. cage offered screen capture
  * (screencopy, export-dmabuf) and input injection (virtual keyboard and
  * pointer) to every client, so any program in the session could photograph
@@ -847,6 +990,13 @@ global_filter(const struct wl_client *client, const struct wl_global *global, vo
 	if (elevated >= 0) {
 		return elevated;
 	}
+#ifndef SG_MUTANT_SHADOW_VIEW_INPUT
+	/* a view-only console shadow sees the screen and nothing to type with */
+	if (client == lock->server->shadow_client && !lock->server->shadow_control && global &&
+	    (global == lock->input_globals[0] || global == lock->input_globals[1])) {
+		return false;
+	}
+#endif
 	for (int i = 0; i < lock->n_restricted; i++) {
 		if (lock->restricted[i] == global) {
 			return lock_client_is_privileged(lock, client);

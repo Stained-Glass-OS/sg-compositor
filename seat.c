@@ -608,7 +608,8 @@ keysyms_have(const xkb_keysym_t *syms, int nsyms, xkb_keysym_t sym)
 }
 
 static void
-handle_key_event(struct wlr_keyboard *keyboard, struct cg_seat *seat, void *data, bool is_virtual)
+handle_key_event(struct wlr_keyboard *keyboard, struct cg_seat *seat, void *data, bool is_virtual,
+		 struct wl_client *owner)
 {
 	struct wlr_keyboard_key_event *event = data;
 
@@ -617,6 +618,21 @@ handle_key_event(struct wlr_keyboard *keyboard, struct cg_seat *seat, void *data
 
 	const xkb_keysym_t *syms;
 	int nsyms = xkb_state_key_get_syms(keyboard->xkb_state, keycode, &syms);
+
+	/* Being viewed over Remote Desktop (console shadow): Ctrl+Alt+Del from
+	 * the console -- any keyboard but the viewer's own -- ends it, and goes
+	 * on to the security screen as ever. */
+	if (seat->server->shadow_client && owner != seat->server->shadow_client &&
+	    event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+		uint32_t mods = wlr_keyboard_get_modifiers(keyboard);
+		for (int i = 0; i < nsyms; i++) {
+			if ((mods & WLR_MODIFIER_CTRL) && (mods & WLR_MODIFIER_ALT) &&
+			    (syms[i] == XKB_KEY_Delete || syms[i] == XKB_KEY_KP_Delete)) {
+				shadow_end(seat->server, "Ctrl+Alt+Del at the console");
+				break;
+			}
+		}
+	}
 
 	/* Remote Desktop has the session: the console's keyboard reaches
 	 * nothing, except Ctrl+Alt+Del, which gives the session back to the
@@ -719,7 +735,7 @@ static void
 handle_keyboard_group_key(struct wl_listener *listener, void *data)
 {
 	struct cg_keyboard_group *cg_group = wl_container_of(listener, cg_group, key);
-	handle_key_event(&cg_group->wlr_group->keyboard, cg_group->seat, data, cg_group->is_virtual);
+	handle_key_event(&cg_group->wlr_group->keyboard, cg_group->seat, data, cg_group->is_virtual, cg_group->owner);
 }
 
 static void
@@ -729,7 +745,7 @@ handle_keyboard_group_modifiers(struct wl_listener *listener, void *data)
 	handle_modifier_event(&group->wlr_group->keyboard, group->seat);
 }
 
-static void
+static struct cg_keyboard_group *
 cg_keyboard_group_add(struct wlr_keyboard *keyboard, struct cg_seat *seat, bool virtual)
 {
 	/* We apparently should not group virtual keyboards,
@@ -743,7 +759,7 @@ cg_keyboard_group_add(struct wlr_keyboard *keyboard, struct cg_seat *seat, bool 
 			struct wlr_keyboard_group *wlr_group = group->wlr_group;
 			if (wlr_keyboard_group_add_keyboard(wlr_group, keyboard)) {
 				wlr_log(WLR_DEBUG, "Added new keyboard to existing group");
-				return;
+				return group;
 			}
 		}
 	}
@@ -753,7 +769,7 @@ cg_keyboard_group_add(struct wlr_keyboard *keyboard, struct cg_seat *seat, bool 
 	struct cg_keyboard_group *cg_group = calloc(1, sizeof(struct cg_keyboard_group));
 	if (cg_group == NULL) {
 		wlr_log(WLR_ERROR, "Failed to allocate keyboard group.");
-		return;
+		return NULL;
 	}
 	cg_group->seat = seat;
 	cg_group->is_virtual = virtual;
@@ -779,29 +795,30 @@ cg_keyboard_group_add(struct wlr_keyboard *keyboard, struct cg_seat *seat, bool 
 	wl_signal_add(&cg_group->wlr_group->keyboard.events.modifiers, &cg_group->modifiers);
 	cg_group->modifiers.notify = handle_keyboard_group_modifiers;
 
-	return;
+	return cg_group;
 
 cleanup:
 	if (cg_group && cg_group->wlr_group) {
 		wlr_keyboard_group_destroy(cg_group->wlr_group);
 	}
 	free(cg_group);
+	return NULL;
 }
 
-static void
+static struct cg_keyboard_group *
 handle_new_keyboard(struct cg_seat *seat, struct wlr_keyboard *keyboard, bool virtual)
 {
 	struct xkb_context *context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
 	if (!context) {
 		wlr_log(WLR_ERROR, "Unable to create XKB context");
-		return;
+		return NULL;
 	}
 
 	struct xkb_keymap *keymap = xkb_keymap_new_from_names(context, NULL, XKB_KEYMAP_COMPILE_NO_FLAGS);
 	if (!keymap) {
 		wlr_log(WLR_ERROR, "Unable to configure keyboard: keymap does not exist");
 		xkb_context_unref(context);
-		return;
+		return NULL;
 	}
 
 	wlr_keyboard_set_keymap(keyboard, keymap);
@@ -810,9 +827,10 @@ handle_new_keyboard(struct cg_seat *seat, struct wlr_keyboard *keyboard, bool vi
 	xkb_context_unref(context);
 	wlr_keyboard_set_repeat_info(keyboard, 25, 600);
 
-	cg_keyboard_group_add(keyboard, seat, virtual);
+	struct cg_keyboard_group *group = cg_keyboard_group_add(keyboard, seat, virtual);
 
 	wlr_seat_set_keyboard(seat->seat, keyboard);
+	return group;
 }
 
 static void
@@ -826,7 +844,10 @@ handle_virtual_keyboard(struct wl_listener *listener, void *data)
 	/* TODO: If multiple seats are supported, check keyboard->seat
 	 * to select the appropriate one */
 
-	handle_new_keyboard(seat, wlr_keyboard, true);
+	struct cg_keyboard_group *group = handle_new_keyboard(seat, wlr_keyboard, true);
+	if (group && keyboard->resource) {
+		group->owner = wl_resource_get_client(keyboard->resource);
+	}
 	update_capabilities(seat);
 }
 

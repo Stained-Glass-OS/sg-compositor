@@ -134,6 +134,35 @@ The reply is `OK remote <output> <W>x<H>`.
   physical-input filter is not in a gate, because headless has no physical
   devices.
 
+### Console shadow (E1 pattern A)
+
+Remote Desktop can also *view* the console session where it is, as Windows'
+shadow does: `SHADOW view` or `SHADOW control` on the control socket (lock
+account or root), with one descriptor -- the RDP daemon's end of a
+socketpair. Nothing moves: the console keeps its screen, its input and its
+lock state; the viewer captures the console's own output. The reply is
+`OK shadow <output> <W>x<H> view|control`; `SHADOWSTATUS` answers
+`OK none|view|control`.
+
+- **View only is enforced here**: a `view` connection is not offered the
+  virtual keyboard and pointer globals (`global_filter`,
+  `lock_restrict_input_global`), so it cannot type or point however it is
+  written. Mutant `SG_MUTANT_SHADOW_VIEW_INPUT`.
+- **A frame says so**: 5 px of amber (#FFB400) round the whole layout, in
+  `shadow_frame_tree`, raised over everything -- a lock screen and the secure
+  prompt included -- for as long as the connection lasts. The viewer sees it
+  too (it is in the captured frames).
+- **It ends** when the connection closes (the frame goes, nothing else
+  changes -- unlike REMOTE, no lock), or on Ctrl+Alt+Del from any keyboard
+  but the viewer's own virtual one (`cg_keyboard_group.owner`), which then
+  goes on to the security screen as ever.
+- One viewer at a time; `SHADOW` is refused (`ERR busy`) during a REMOTE
+  takeover and `REMOTE` during a shadow.
+- Whether another user's session may be viewed -- an administrator asking,
+  the person at the console answering on the secure surface -- is settled by
+  sg-rdp-authd's monitor and sg-brokerd before `SHADOW` is sent. Gate:
+  sg-session's `make test-rdp-shadow`.
+
 ## Display power and idle (`make test-power`)
 
 Settings' "Turn off the screen after" is sg-session's `sg-settingsctl`

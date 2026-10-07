@@ -86,6 +86,9 @@ struct cg_keyboard_group {
 	struct wl_listener modifiers;
 	struct wl_list link; // cg_seat::keyboard_groups
 	bool is_virtual;
+	/* sg-compositor: a virtual keyboard's client (console shadow: its own
+	 * keyboard is the remote side, every other one the console) */
+	struct wl_client *owner;
 };
 
 struct cg_pointer {

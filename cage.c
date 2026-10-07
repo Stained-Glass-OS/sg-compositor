@@ -407,6 +407,16 @@ main(int argc, char *argv[])
 		wlr_scene_node_set_enabled(&server.dim_rect->node, false);
 	}
 	server.privileged_tree = wlr_scene_tree_create(&server.scene->tree);
+	/* the console shadow's frame (lock.c), over everything, even a lock
+	 * screen: whoever is at the console sees that they are being viewed */
+	server.shadow_frame_tree = wlr_scene_tree_create(&server.scene->tree);
+	if (server.shadow_frame_tree) {
+		for (int i = 0; i < 4; i++) {
+			server.shadow_frame[i] = wlr_scene_rect_create(server.shadow_frame_tree, 1, 1,
+								       (float[4]) {1.0f, 180.0f / 255.0f, 0.0f, 1.0f});
+		}
+		wlr_scene_node_set_enabled(&server.shadow_frame_tree->node, false);
+	}
 	if (!server.normal_tree || !server.elevated_tree || !server.privileged_tree) {
 		wlr_log(WLR_ERROR, "Unable to create the scene layers");
 		ret = 1;
@@ -588,7 +598,7 @@ main(int argc, char *argv[])
 		ret = 1;
 		goto end;
 	}
-	lock_restrict_global(&server.lock, virtual_keyboard->global);
+	lock_restrict_input_global(&server.lock, virtual_keyboard->global);
 	wl_signal_add(&virtual_keyboard->events.new_virtual_keyboard, &server.new_virtual_keyboard);
 
 	struct wlr_virtual_pointer_manager_v1 *virtual_pointer =
@@ -598,7 +608,7 @@ main(int argc, char *argv[])
 		ret = 1;
 		goto end;
 	}
-	lock_restrict_global(&server.lock, virtual_pointer->global);
+	lock_restrict_input_global(&server.lock, virtual_pointer->global);
 	wl_signal_add(&virtual_pointer->events.new_virtual_pointer, &server.new_virtual_pointer);
 
 	server.relative_pointer_manager = wlr_relative_pointer_manager_v1_create(server.wl_display);

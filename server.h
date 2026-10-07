@@ -83,6 +83,17 @@ struct cg_server {
 	struct wl_client *remote_client;
 	struct wl_listener remote_client_destroy;
 
+	/* sg-compositor: console shadow (E1 pattern A) -- Remote Desktop views,
+	 * or views and controls, this session where it is, at the console,
+	 * which keeps working as before. The RDP daemon's connection, handed
+	 * over with SHADOW; while it lasts a frame round the screen says so,
+	 * and when it closes nothing else changes. See shadow_attach(). */
+	struct wl_client *shadow_client;
+	struct wl_listener shadow_client_destroy;
+	bool shadow_control; /* may it type and click (else view only) */
+	struct wlr_scene_tree *shadow_frame_tree; /* the frame, above everything */
+	struct wlr_scene_rect *shadow_frame[4];
+
 	/* sg-compositor: elevated programs' displays (elevated.c). Stacking, from
 	 * the bottom: the session's views, elevated programs' windows -- which no
 	 * session window can cover -- and privileged views (lock screen, consent
