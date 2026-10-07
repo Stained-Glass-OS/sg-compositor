@@ -74,6 +74,10 @@ CPID=$!
 # Wait for the keylogger to be running inside the session.
 _w=0; while ! grep -q 'LL_HOOK=' "$T/adv.txt" 2>/dev/null && [ $_w -lt 90 ]; do sleep 1; _w=$((_w+1)); done
 grep -q 'LL_HOOK=' "$T/adv.txt" 2>/dev/null || { fail "keylogger never started"; exit 1; }
+# and for Notepad's window, which takes the keys: with no Wine window up nothing
+# in the session has the X focus, and the control keys below went nowhere (the
+# keylogger "caught nothing" whenever Notepad came up later than 4 s, 2026-10-06)
+_w=0; while ! DISPLAY="$(cat "$T/userdisplay")" xdotool search --name Notepad >/dev/null 2>&1 && [ $_w -lt 60 ]; do sleep 1; _w=$((_w+1)); done
 sleep 4
 
 # 1. Teeth.

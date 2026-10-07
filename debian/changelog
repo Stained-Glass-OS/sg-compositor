@@ -1,3 +1,13 @@
+sg-compositor (0.2.0+sg47) unstable; urgency=medium
+
+  * test-lock and test-secure wait for Notepad's window before the control
+    keys: with no Wine window up nothing in the session has the X focus,
+    and the control keys went nowhere -- "keylogger caught nothing" every
+    run once the session's programs came up later than the gate's fixed
+    4 s. The locked checks are unchanged.
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Wed, 07 Oct 2026 03:00:29 -0700
+
 sg-compositor (0.2.0+sg46) unstable; urgency=medium
 
   * The test build's tablet can be unplugged ("unplug" on its FIFO; "plug"
