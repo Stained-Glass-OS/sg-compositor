@@ -5,6 +5,14 @@
 # who is privileged is decided by the kernel's SO_PEERCRED, not by the client.
 # Output management is the exception: every program may set the resolution
 # (Display settings does), but not while locked and never all displays off.
+#
+# Screen capture changed in 0.2.0+sg16 (public_capture.c, David 2026-09-30:
+# "let any app capture, with lock and consent screens blanked"): an ordinary
+# client is offered ONE screencopy global -- the public one, which blanks the
+# secure screens -- and never wlroots' own, which shows everything (the lock
+# screen included) and stays for privileged clients (Remote Desktop). Until
+# sg45 this gate still demanded "no capture at all" and failed on every main
+# since sg16; it now checks that split. The blanking itself is test-capture's.
 set -u
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 COMP="${SG_COMPOSITOR_BIN:-$HERE/build/sg-compositor}"
@@ -24,12 +32,26 @@ CP=$!
 _w=0; while [ ! -s "$T/d" ] && [ $_w -lt 50 ]; do sleep 0.2; _w=$((_w+1)); done
 D=$(cat "$T/d")
 
-SENS='zwlr_screencopy_manager_v1|zwlr_export_dmabuf_manager_v1|zwp_virtual_keyboard_manager_v1|zwlr_virtual_pointer_manager_v1|zwlr_gamma_control_manager_v1'
-n=$(WAYLAND_DISPLAY="$D" wayland-info 2>/dev/null | grep -cE "$SENS")
-[ "$n" -eq 0 ] && pass "an ordinary client is offered none of the five sensitive protocols" \
-               || fail "an ordinary client is offered $n sensitive protocols"
-n=$(WAYLAND_DISPLAY="$T/priv.sock" wayland-info 2>/dev/null | grep -oE "$SENS" | sort -u | wc -l)
-[ "$n" -eq 5 ] && pass "a privileged client is offered all five" || fail "a privileged client is offered $n of five"
+# Never offered to an ordinary client: export-dmabuf, input injection, gamma.
+SENS='zwlr_export_dmabuf_manager_v1|zwp_virtual_keyboard_manager_v1|zwlr_virtual_pointer_manager_v1|zwlr_gamma_control_manager_v1'
+WAYLAND_DISPLAY="$D" wayland-info >"$T/ord.info" 2>/dev/null
+WAYLAND_DISPLAY="$T/priv.sock" wayland-info >"$T/priv.info" 2>/dev/null
+n=$(grep -cE "$SENS" "$T/ord.info")
+[ "$n" -eq 0 ] && pass "an ordinary client is offered none of the four injection/dmabuf/gamma protocols" \
+               || fail "an ordinary client is offered $n of them"
+n=$(grep -oE "$SENS" "$T/priv.info" | sort -u | wc -l)
+[ "$n" -eq 4 ] && pass "a privileged client is offered all four" || fail "a privileged client is offered $n of four"
+# One screencopy global each: the ordinary client's is the public (blanking)
+# one; a second would be wlroots' unrestricted copy of the lock screen.
+n=$(grep -c "zwlr_screencopy_manager_v1" "$T/ord.info")
+[ "$n" -eq 1 ] && pass "an ordinary client is offered exactly one screen capture (the public one)" \
+               || fail "an ordinary client is offered $n screencopy globals"
+n=$(grep -c "zwlr_screencopy_manager_v1" "$T/priv.info")
+[ "$n" -eq 1 ] && pass "a privileged client is offered exactly one (wlroots')" \
+               || fail "a privileged client is offered $n screencopy globals"
+sc_name() { awk -F"name: " '/zwlr_screencopy_manager_v1/ { split($2, a, /[^0-9]/); print a[1]; exit }' "$1"; }
+[ -n "$(sc_name "$T/ord.info")" ] && [ "$(sc_name "$T/ord.info")" != "$(sc_name "$T/priv.info")" ] \
+    && pass "and they are different globals" || fail "ordinary and privileged share a screencopy global ($(sc_name "$T/ord.info"))"
 
 # Resolution: any client may, as Display settings does.
 if command -v wlr-randr >/dev/null; then
@@ -54,10 +76,24 @@ else
     echo "info  wlr-randr missing: resolution checks skipped"
 fi
 
-WAYLAND_DISPLAY="$D" grim "$T/o.png" >/dev/null 2>&1
-[ -s "$T/o.png" ] && fail "an ordinary client captured the screen" || pass "an ordinary client cannot capture the screen"
-WAYLAND_DISPLAY="$T/priv.sock" grim "$T/p.png" >/dev/null 2>&1
-[ -s "$T/p.png" ] && pass "a privileged client can capture the screen" || fail "a privileged client could not capture"
+# Capture: the ordinary client may, the privileged one too; while locked the
+# ordinary client's picture is pure black (it never sees the lock screen).
+cap() { rm -f "$T/c.png"; WAYLAND_DISPLAY="$1" grim -s 1 "$T/c.png" >/dev/null 2>&1 || { echo none; return; }
+        python3 -c 'import sys,zlib,struct
+d=open(sys.argv[1],"rb").read(); i=8; idat=b""; w=h=0
+while i < len(d):
+    n,t=struct.unpack(">I4s",d[i:i+8]); c=d[i+8:i+8+n]; i+=12+n
+    if t==b"IHDR": w,h,bd,ct=struct.unpack(">IIBB",c[:10])
+    elif t==b"IDAT": idat+=c
+raw=zlib.decompress(idat); print("black" if not any(b for k,b in enumerate(raw) if k % (1+w*(3 if ct==2 else 4)) != 0 and (ct!=6 or (k % (1+w*4) - 1) % 4 != 3)) else "picture")' "$T/c.png" 2>/dev/null || echo none; }
+[ "$(cap "$D")" = picture ] && pass "an ordinary client can capture the screen as shown (public capture)" || fail "an ordinary client could not capture"
+[ "$(cap "$T/priv.sock")" != none ] && pass "a privileged client can capture the screen" || fail "a privileged client could not capture"
+python3 -c 'import socket, sys
+s = socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); s.sendall(b"LOCK\n"); s.recv(64)' "$T/ctl.sock"; sleep 1
+r=$(cap "$D")
+[ "$r" = black ] && pass "while locked, the ordinary client's capture is black" || fail "while locked, the ordinary client captured: $r"
+python3 -c 'import socket, sys
+s = socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); s.sendall(b"UNLOCK\n"); s.recv(64)' "$T/ctl.sock"
 
 # Across accounts: needs a second identity, so it skips without passwordless sudo.
 if sudo -n true 2>/dev/null; then

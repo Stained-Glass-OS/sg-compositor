@@ -524,7 +524,9 @@ main(int argc, char *argv[])
 	}
 
 	struct wlr_screencopy_manager_v1 *screencopy = wlr_screencopy_manager_v1_create(server.wl_display);
+#ifndef SG_MUTANT_SCREENCOPY_UNRESTRICTED
 	lock_restrict_global(&server.lock, screencopy ? screencopy->global : NULL);
+#endif
 	if (!screencopy) {
 		wlr_log(WLR_ERROR, "Unable to create the screencopy manager");
 		ret = 1;

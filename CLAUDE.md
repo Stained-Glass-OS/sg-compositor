@@ -35,7 +35,9 @@ when rebasing onto a newer cage or wlroots. Source file names stay cage's
    ADR 0009, since a frozen keylogger recovers `GetAsyncKeyState` press bits
    on thaw.
 3. **Session-scoped privileged protocols — done** (`make test-privileged`).
-   An ordinary client is not even offered screen capture or input injection;
+   An ordinary client is not offered input injection, export-dmabuf or
+   gamma, and its only screen capture is the public one (`public_capture.c`,
+   since sg16) that blanks the lock and consent screens;
    a privileged client — the machine session's account or root, by
    `SO_PEERCRED` — gets all six and can capture. Another account can neither
    connect privileged nor UNLOCK, and the refusal is audited.
