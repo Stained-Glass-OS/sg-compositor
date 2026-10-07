@@ -1697,7 +1697,7 @@ handle_destroy(struct wl_listener *listener, void *data)
  * -- emitted as a tablet tool's events, through the same wlr_cursor path a
  * real pen's take; and a touch screen's: "tdown ID X Y", "tmove ID X Y",
  * "tup ID" (each with its frame). With SG_TEST_TABLET_LATE set, the tablet
- * is plugged in only at a "plug" line. */
+ * is plugged in only at a "plug" line; "unplug" removes it again. */
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -1781,6 +1781,23 @@ test_tablet_line(const char *line)
 		if (!test_plugged) {
 			test_plugged = true;
 			test_seat->new_input.notify(&test_seat->new_input, &test_tablet.base);
+		}
+	} else if (!strncmp(line, "unplug", 6)) {
+		/* the tablet goes away (a Bluetooth pen switched off, iptsd
+		 * stopped): its destroy signal, as a real device's; a "plug"
+		 * brings it back */
+		if (test_plugged) {
+			test_plugged = false;
+#ifndef SG_MUTANT_UNPLUG_KEEPS_PEN
+			/* its pen goes with it, as libinput's tools do (kept, the
+			 * pen's state outlived the tablet: plugged in again, its
+			 * tip was still down and no stroke began) */
+			wl_signal_emit_mutable(&test_tool.events.destroy, &test_tool);
+			wl_signal_init(&test_tool.events.destroy);
+			test_tool.data = NULL;
+#endif
+			wlr_tablet_finish(&test_tablet);
+			wlr_tablet_init(&test_tablet, &test_tablet_impl, "sg-test-pen");
 		}
 	} else if (sscanf(line, "in %lf %lf", &x, &y) == 2) {
 		test_x = x, test_y = y;

@@ -183,7 +183,7 @@ test-animbg: build
 .PHONY: test-pen
 test-pen:
 	@sh test/pen-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || [ $$rc -eq 0 ] || exit $$rc; \
-	 for m in TABLET TABLET_AS_MOUSE NO_BUILTIN_MAP NO_PEN_RANGE; do \
+	 for m in TABLET TABLET_AS_MOUSE NO_BUILTIN_MAP NO_PEN_RANGE UNPLUG_KEEPS_PEN; do \
 	   sh test/pen-gate.sh --mutant $$m >/dev/null 2>&1; rc=$$?; [ $$rc -eq 1 ] || { echo "pen-gate: the mutant $$m was not caught ($$rc)"; exit 1; }; \
 	   echo "pen-gate: mutant $$m caught"; \
 	 done

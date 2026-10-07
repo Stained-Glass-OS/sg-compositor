@@ -21,6 +21,8 @@
 #  6. A tablet plugged in later (the test build's SG_TEST_TABLET_LATE and a
 #     "plug" line) gives X its pen devices then: what wine-sg 1150's
 #     hotplugging is tested with.
+#  7. Unplugged ("unplug", 0.2.0+sg46), X has the pen no more; plugged in
+#     again, it is back and draws -- wine-sg 1420's pen coming and going.
 #
 # A compositor built with -Dtest-tablet=true has a pen and a touch screen fed
 # from a FIFO (SG_TEST_TABLET_FIFO), their events taking the same wlr_cursor
@@ -29,7 +31,8 @@
 #   --mutant NAME: built with SG_MUTANT_NAME; must fail:
 #     TABLET (tablets ignored), TABLET_AS_MOUSE (no tablet-v2: no pressure),
 #     NO_BUILTIN_MAP (pen and touch over every screen), NO_PEN_RANGE (no
-#     _SG_PEN_IN_RANGE: Wine cannot tell a pen left).
+#     _SG_PEN_IN_RANGE: Wine cannot tell a pen left), UNPLUG_KEEPS_PEN (the
+#     test tablet's "unplug" leaves its pen: plugged in again, it is stuck).
 set -u
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 B=${SG_PEN_BUILD:-$HERE/build-pen}
@@ -172,14 +175,31 @@ pen out
 stop
 
 # --- 6. a tablet plugged in later (SG_TEST_TABLET_LATE): its X devices come then ---
-rm -f "$T/go"
-start "timeout 2 $T/penxi2-probe 400 300 > $T/before.log 2>&1; while [ ! -e $T/go ]; do sleep 0.2; done; $T/penxi2-probe 400 300 > $T/after.log 2>&1" \
+rm -f "$T/go" "$T/go2" "$T/go3"
+start "timeout 2 $T/penxi2-probe 400 300 > $T/before.log 2>&1; while [ ! -e $T/go ]; do sleep 0.2; done; timeout 2 $T/penxi2-probe 400 300 > $T/after.log 2>&1; while [ ! -e $T/go2 ]; do sleep 0.2; done; timeout 2 $T/penxi2-probe 400 300 > $T/gone.log 2>&1; while [ ! -e $T/go3 ]; do sleep 0.2; done; $T/penxi2-probe 400 300 > $T/back.log 2>&1" \
     SG_TEST_TABLET_LATE=1
 grep -q stylus "$T/before.log" && fail "a pen device before the tablet was plugged in" || pass "no pen device before the tablet comes"
 pen plug
 touch "$T/go"
 sleep 3
-stop
 grep -q 'stylus.*pressure-axis=[0-9]' "$T/after.log" && pass "plugged in, the tablet's pen is an X device with pressure" \
     || fail "no pen device after the tablet came: $(grep -c device "$T/after.log") devices"
+# --- 7. and unplugged in the middle of a stroke ("unplug", 0.2.0+sg46):
+# Xwayland takes its pen devices out of use (wine-sg 1420's pen leaving is tested with it); plugged
+# in again, the pen is back and draws
+pen "in 0.5 0.5" "move 0.5 0.5" down "move 0.51 0.5" unplug
+touch "$T/go2"
+sleep 3
+grep -q 'stylus.*use=3' "$T/gone.log" && fail "unplugged, the pen is still an X pointer: $(grep stylus "$T/gone.log")" \
+    || pass "unplugged, the tablet's pen is no X pointer any more"
+pen plug
+touch "$T/go3"
+sleep 3
+mark "$T/back.log"
+pen "in 0.5 0.5" "move 0.5 0.5" "pressure 0.7" down "move 0.51 0.5" up out
+stop
+grep -q 'stylus.*use=3.*pressure-axis=[0-9]' "$T/back.log" && since "$T/back.log" | grep '^motion dev=xwayland-tablet stylus' | grep -q 'pressure=4587[0-9]' \
+    && since "$T/back.log" | grep -q '^press dev=xwayland-tablet stylus' \
+    && pass "plugged in again, the pen is back: its tip and pressure reach the program" \
+    || fail "plugged in again: $(grep stylus "$T/back.log" | head -1); $(since "$T/back.log" | cut -c1-40 | sort | uniq -c | tr '\n' ' ')"
 exit $RC
