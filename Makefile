@@ -18,7 +18,7 @@ install: build
 # The gate is sg-session's own session gate, run with this compositor hosting
 # the session instead of cage. Milestone 1 of ADR 0011 is exactly "that still
 # passes", so the gate is the same one, not a new one.
-test: test-session test-lock test-secure test-secure-dim test-xwindows test-privileged test-sas test-power test-elevated test-popup test-backdrop test-xfloat test-decor test-decorlook test-decorsmooth test-capture test-wmreq test-jumpclick test-bigwindow test-desktopfront test-selfmove test-deskcomp test-bgpart test-glassframe test-animbg test-embedfocus test-pen test-unmapcfg test-wlapp
+test: test-session test-lock test-secure test-secure-dim test-xwindows test-privileged test-sas test-power test-elevated test-popup test-backdrop test-xfloat test-decor test-decorlook test-decorsmooth test-capture test-wmreq test-jumpclick test-bigwindow test-desktopfront test-selfmove test-deskcomp test-bgpart test-glassframe test-animbg test-embedfocus test-pen test-touchcursor test-unmapcfg test-wlapp
 
 test-session: build
 	@[ -d "$(SG_SESSION)" ] || { echo "sg-session checkout not found at $(SG_SESSION)"; exit 2; }
@@ -180,6 +180,13 @@ test-animbg: build
 # GTK, and pen and touch stay on the built-in screen: a test build
 # (-Dtest-tablet=true, build-pen/) feeds them from a FIFO; each mutant build
 # (build-pen-mutant-NAME/) must fail.
+.PHONY: test-touchcursor
+test-touchcursor:
+	@sh test/touchcursor-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || [ $$rc -eq 0 ] || exit $$rc; \
+	 sh test/touchcursor-gate.sh --mutant TOUCH_KEEPS_CURSOR >/dev/null 2>&1; rc=$$?; \
+	 [ $$rc -eq 1 ] || { echo "touchcursor-gate: the mutant TOUCH_KEEPS_CURSOR was not caught ($$rc)"; exit 1; }; \
+	 echo "touchcursor-gate: mutant TOUCH_KEEPS_CURSOR caught"
+
 .PHONY: test-pen
 test-pen:
 	@sh test/pen-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || [ $$rc -eq 0 ] || exit $$rc; \

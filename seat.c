@@ -899,6 +899,59 @@ handle_request_set_selection(struct wl_listener *listener, void *data)
 	wlr_seat_set_selection(seat->seat, event->source, event->serial);
 }
 
+/* sg-compositor: the pointer hidden while touch is used (see seat.h) */
+static void
+handle_client_cursor_destroy(struct wl_listener *listener, void *data)
+{
+	struct cg_seat *seat = wl_container_of(listener, seat, client_cursor_destroy);
+	seat->client_cursor = NULL;
+	wl_list_remove(&seat->client_cursor_destroy.link);
+	wl_list_init(&seat->client_cursor_destroy.link);
+}
+
+static void
+remember_client_cursor(struct cg_seat *seat, struct wlr_surface *surface, int32_t hx, int32_t hy)
+{
+	if (seat->client_cursor) {
+		wl_list_remove(&seat->client_cursor_destroy.link);
+		wl_list_init(&seat->client_cursor_destroy.link);
+	}
+	seat->client_cursor = surface;
+	seat->client_cursor_hx = hx;
+	seat->client_cursor_hy = hy;
+	if (surface) {
+		wl_signal_add(&surface->events.destroy, &seat->client_cursor_destroy);
+	}
+}
+
+static void
+cursor_hide_for_touch(struct cg_seat *seat)
+{
+#ifdef SG_MUTANT_TOUCH_KEEPS_CURSOR
+	return;
+#endif
+	if (seat->cursor_hidden_by_touch) {
+		return;
+	}
+	seat->cursor_hidden_by_touch = true;
+	wlr_cursor_unset_image(seat->cursor);
+}
+
+/* the mouse, a touchpad or the pen: the pointer shows again */
+static void
+cursor_show_after_touch(struct cg_seat *seat)
+{
+	if (!seat->cursor_hidden_by_touch) {
+		return;
+	}
+	seat->cursor_hidden_by_touch = false;
+	if (seat->client_cursor) {
+		wlr_cursor_set_surface(seat->cursor, seat->client_cursor, seat->client_cursor_hx, seat->client_cursor_hy);
+	} else {
+		wlr_cursor_set_xcursor(seat->cursor, seat->xcursor_manager, DEFAULT_XCURSOR);
+	}
+}
+
 static void
 handle_request_set_cursor(struct wl_listener *listener, void *data)
 {
@@ -914,7 +967,11 @@ handle_request_set_cursor(struct wl_listener *listener, void *data)
 	/* This can be sent by any client, so we check to make sure
 	 * this one actually has pointer focus first. */
 	if (focused_client == event->seat_client->client) {
-		wlr_cursor_set_surface(seat->cursor, event->surface, event->hotspot_x, event->hotspot_y);
+		remember_client_cursor(seat, event->surface, event->hotspot_x, event->hotspot_y);
+		/* hidden while touch is used: shown when the mouse moves */
+		if (!seat->cursor_hidden_by_touch) {
+			wlr_cursor_set_surface(seat->cursor, event->surface, event->hotspot_x, event->hotspot_y);
+		}
 	}
 }
 
@@ -926,6 +983,9 @@ handle_touch_down(struct wl_listener *listener, void *data)
 		return;
 	}
 	struct wlr_touch_down_event *event = data;
+
+	/* a finger on the screen: no pointer, as on Windows */
+	cursor_hide_for_touch(seat);
 
 	double lx, ly;
 	wlr_cursor_absolute_to_layout_coords(seat->cursor, &event->touch->base, event->x, event->y, &lx, &ly);
@@ -1033,6 +1093,7 @@ handle_cursor_axis(struct wl_listener *listener, void *data)
 	if (console_input_ignored(seat, event->pointer)) {
 		return;
 	}
+	cursor_show_after_touch(seat);
 
 	wlr_seat_pointer_notify_axis(seat->seat, event->time_msec, event->orientation, event->delta,
 				     event->delta_discrete, event->source, event->relative_direction);
@@ -1077,6 +1138,7 @@ handle_cursor_button(struct wl_listener *listener, void *data)
 	if (console_input_ignored(seat, event->pointer)) {
 		return;
 	}
+	cursor_show_after_touch(seat);
 
 	seat_pointer_button(seat, &event->pointer->base, event->time_msec, event->button, event->state);
 }
@@ -1171,6 +1233,7 @@ process_cursor_motion(struct cg_seat *seat, uint32_t time_msec, double dx, doubl
 	struct wlr_seat *wlr_seat = seat->seat;
 	struct wlr_surface *surface = NULL;
 
+	cursor_show_after_touch(seat);
 	seat_update_cursor_size(seat, false);
 	/* sg-compositor: a program's native Wayland window being moved or
 	 * resized (it asked, from its own title bar) takes the motion */
@@ -1681,6 +1744,7 @@ handle_destroy(struct wl_listener *listener, void *data)
 	wl_list_remove(&seat->tablet_tool_tip.link);
 	wl_list_remove(&seat->tablet_tool_button.link);
 	wl_list_remove(&seat->request_set_cursor.link);
+	wl_list_remove(&seat->client_cursor_destroy.link);
 	wl_list_remove(&seat->request_set_selection.link);
 	wl_list_remove(&seat->request_set_primary_selection.link);
 
@@ -1977,6 +2041,8 @@ seat_create(struct cg_server *server, struct wlr_backend *backend)
 	seat->tablet_tool_button.notify = handle_tablet_tool_button;
 	wl_signal_add(&seat->cursor->events.tablet_tool_button, &seat->tablet_tool_button);
 
+	seat->client_cursor_destroy.notify = handle_client_cursor_destroy;
+	wl_list_init(&seat->client_cursor_destroy.link);
 	seat->request_set_cursor.notify = handle_request_set_cursor;
 	wl_signal_add(&seat->seat->events.request_set_cursor, &seat->request_set_cursor);
 	seat->request_set_selection.notify = handle_request_set_selection;

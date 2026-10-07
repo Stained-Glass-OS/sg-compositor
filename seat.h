@@ -50,6 +50,13 @@ struct cg_seat {
 	int32_t touch_id;
 	double touch_lx;
 	double touch_ly;
+	/* the pointer hidden while touch is used, as on Windows: the mouse, a
+	 * touchpad or the pen moving shows it again, with the image the program
+	 * under it last asked for (kept here; cleared when its surface goes) */
+	bool cursor_hidden_by_touch;
+	struct wlr_surface *client_cursor;
+	int32_t client_cursor_hx, client_cursor_hy;
+	struct wl_listener client_cursor_destroy;
 	struct wl_listener touch_down;
 	struct wl_listener touch_up;
 	struct wl_listener touch_motion;

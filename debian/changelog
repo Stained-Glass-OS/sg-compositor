@@ -1,3 +1,13 @@
+sg-compositor (0.2.0+sg49) unstable; urgency=medium
+
+  * The pointer hides while touch is used, as on Windows (David, on the
+    Surface: it sat in the middle of the screen): a finger on the screen
+    hides it; the mouse, a touchpad or the pen moving shows it again, with
+    the image the program under it last asked for. test-touchcursor;
+    mutant SG_MUTANT_TOUCH_KEEPS_CURSOR.
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Wed, 07 Oct 2026 13:47:18 -0700
+
 sg-compositor (0.2.0+sg48) unstable; urgency=medium
 
   * Console shadow (E1 pattern A): SHADOW view|control on the control socket
