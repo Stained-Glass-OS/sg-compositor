@@ -14,6 +14,8 @@
 #   6. input keeps resetting the idle timer
 #   7. an idle inhibitor holds the timeout off; releasing it lets it fire
 #   8. the exact swayidle + wlopm chain Settings starts, end to end
+#   9. an INHIBIT on the control socket (sg-session's ScreenSaver service, for
+#      Wine's power requests) holds the timeout off until it is closed
 set -u
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 COMP="${SG_COMPOSITOR_BIN:-$HERE/build/sg-compositor}"
@@ -135,6 +137,24 @@ SP=$!
 waitfor '[ "$(state)" = off ]' 40 && pass "Settings' chain: idle turns the screen off" || fail "Settings' chain: the screen stayed '$(state)'"
 key
 waitfor '[ "$(state)" = on ]' 25 && pass "Settings' chain: a key turns it back on" || fail "Settings' chain: the screen stayed '$(state)' after a key"
+stopidle
+
+# 9. Mutant: SG_MUTANT_INHIBIT_IGNORED (lock.c).
+ctl() { python3 -c 'import socket,sys; s=socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); s.sendall((sys.argv[2]+"\n").encode()); print(s.recv(64).decode().strip())' "$T/ctl.sock" "$1" 2>/dev/null; }
+[ "$(ctl IDLE)" = "OK not inhibited" ] && pass "IDLE: not inhibited" || fail "IDLE said '$(ctl IDLE)'"
+python3 -c 'import socket,sys,time; s=socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); s.sendall(b"INHIBIT\n"); print(s.recv(64).decode().strip(), flush=True); time.sleep(600)' \
+    "$T/ctl.sock" >"$T/cinh" 2>&1 &
+IP=$!
+waitfor 'grep -q "OK inhibited" "$T/cinh"' 25 && pass "INHIBIT on the control socket is taken" || fail "INHIBIT answered '$(cat "$T/cinh")'"
+[ "$(ctl IDLE)" = "OK inhibited" ] && pass "IDLE: inhibited while it is held" || fail "IDLE said '$(ctl IDLE)' while held"
+key
+idle 2
+sleep 5
+[ -e "$T/idle" ] && fail "the timeout fired while a control-socket INHIBIT was held" \
+                 || pass "a control-socket INHIBIT holds a 2 s timeout off for 5 s"
+kill "$IP" 2>/dev/null; wait "$IP" 2>/dev/null; IP=""
+waitfor '[ -e "$T/idle" ]' 30 && pass "closing the connection releases it" || fail "the timeout never fired after the INHIBIT connection closed"
+[ "$(ctl IDLE)" = "OK not inhibited" ] && pass "IDLE: not inhibited again" || fail "IDLE said '$(ctl IDLE)' after release"
 stopidle
 
 kill "$CP" 2>/dev/null

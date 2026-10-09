@@ -1,3 +1,16 @@
+sg-compositor (0.2.0+sg50) unstable; urgency=medium
+
+  * INHIBIT on the control socket: the connection holds the idle
+    notifications off (as a Wayland idle inhibitor does) until it closes,
+    for sg-session's org.freedesktop.ScreenSaver service -- programs that
+    are not Wayland clients (Wine's power requests and
+    SetThreadExecutionState, X11 programs) keep the screen and the sleep
+    timers waiting through it. Anyone in the session may, as with LOCK.
+    IDLE says whether the idle is held. test-power (9); mutant
+    SG_MUTANT_INHIBIT_IGNORED.
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Fri, 09 Oct 2026 00:24:25 -0700
+
 sg-compositor (0.2.0+sg49) unstable; urgency=medium
 
   * The pointer hides while touch is used, as on Windows (David, on the

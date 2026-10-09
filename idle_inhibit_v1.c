@@ -21,7 +21,7 @@ struct cg_idle_inhibitor_v1 {
 	struct wl_listener destroy;
 };
 
-static void
+void
 idle_inhibit_v1_check_active(struct cg_server *server)
 {
 	/* Due to Cage's unique window management, we don't need to
@@ -31,7 +31,7 @@ idle_inhibit_v1_check_active(struct cg_server *server)
 	   reported, does not warrant the additional complexity.
 	   Hence, we simply check for any inhibitors and inhibit
 	   accordingly. */
-	bool inhibited = !wl_list_empty(&server->inhibitors);
+	bool inhibited = !wl_list_empty(&server->inhibitors) || server->control_inhibitors > 0;
 	wlr_idle_notifier_v1_set_inhibited(server->idle, inhibited);
 }
 

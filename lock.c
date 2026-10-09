@@ -25,6 +25,7 @@
  */
 #define _GNU_SOURCE
 #include "lock.h"
+#include "idle_inhibit_v1.h"
 #include "session_x11.h"
 
 #include <errno.h>
@@ -69,6 +70,30 @@ watcher_free(struct cg_watcher *w)
 	wl_event_source_remove(w->source);
 	close(w->fd);
 	free(w);
+}
+
+/* An INHIBIT connection: idle is held off until it closes. */
+struct cg_inhibit {
+	struct cg_server *server;
+	int fd;
+	struct wl_event_source *source;
+};
+
+static int
+handle_inhibit_event(int fd, uint32_t mask, void *data)
+{
+	struct cg_inhibit *inh = data;
+	struct cg_server *server = inh->server;
+
+	(void) fd;
+	(void) mask;
+	/* hung up (or wrote something, which it should not): released */
+	wl_event_source_remove(inh->source);
+	close(inh->fd);
+	free(inh);
+	server->control_inhibitors--;
+	idle_inhibit_v1_check_active(server);
+	return 0;
 }
 
 /* A watcher's only traffic is what we send; anything readable means it hung
@@ -427,7 +452,7 @@ shadow_attach(struct cg_lock *lock, int fd, bool control, char *reply, size_t le
 	return true;
 }
 
-/* One command per connection: LOCK, UNLOCK, SECURE, RELEASE, SAS <action>, WATCH, STATUS,
+/* One command per connection: LOCK, UNLOCK, SECURE, RELEASE, SAS <action>, WATCH, INHIBIT, IDLE, STATUS,
  * REMOTE (optionally with the remote connection's fd), LOCAL, or SHADOW view|control
  * (with the shadow connection's fd). */
 static int
@@ -521,6 +546,31 @@ handle_control_connection(int fd, uint32_t mask, void *data)
 			}
 			return 0; /* the connection stays open */
 		}
+	} else if (!strcmp(buf, "INHIBIT")) {
+		/* Anyone in the session may keep the screen on, as any Wayland
+		 * client may with an idle inhibitor; the hold lasts as long as the
+		 * connection does. */
+		struct cg_inhibit *inh;
+		if (!uid_may_lock(lock, uid) || !(inh = calloc(1, sizeof(*inh)))) {
+			reply = "ERR not permitted\n";
+		} else {
+			fcntl(client_fd, F_SETFL, fcntl(client_fd, F_GETFL) | O_NONBLOCK);
+			inh->server = lock->server;
+			inh->fd = client_fd;
+			inh->source = wl_event_loop_add_fd(wl_display_get_event_loop(lock->server->wl_display), client_fd,
+							   WL_EVENT_READABLE, handle_inhibit_event, inh);
+			lock->server->control_inhibitors++;
+#ifndef SG_MUTANT_INHIBIT_IGNORED
+			idle_inhibit_v1_check_active(lock->server);
+#endif
+			if (send(client_fd, "OK inhibited\n", 13, MSG_NOSIGNAL) < 0) {
+				handle_inhibit_event(client_fd, 0, inh);
+			}
+			return 0; /* the connection stays open */
+		}
+	} else if (!strcmp(buf, "IDLE")) {
+		reply = lock->server->control_inhibitors > 0 || !wl_list_empty(&lock->server->inhibitors)
+				? "OK inhibited\n" : "OK not inhibited\n";
 	} else if (!strcmp(buf, "SECURE")) {
 		if (!uid_may_unlock(lock, uid)) {
 			AUDIT("refused SECURE from uid %d", (int) uid);

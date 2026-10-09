@@ -47,6 +47,10 @@ when rebasing onto a newer cage or wlroots. Source file names stay cage's
 - `-L path` is the **privileged Wayland socket**: the lock screen and remote
   access connect here. `-C path` is a **control socket** taking `LOCK`,
   `UNLOCK`, `STATUS`. `-U uid` is the machine session's account.
+- `INHIBIT` holds the idle notifications off for as long as its connection
+  stays open (sg-session's `org.freedesktop.ScreenSaver` service: Wine's power
+  requests, X11 programs); anyone in the session may, like `LOCK`. `IDLE`
+  says whether anything holds it. `test-power` covers both.
 - **Authority is `SO_PEERCRED`, never file permissions.** The compositor runs
   as the logged-in user, so that user's programs can reach any socket it
   creates. Anyone in the session may `LOCK`; only `-U`'s uid or root may

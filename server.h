@@ -33,6 +33,10 @@ struct cg_server {
 	struct wlr_idle_inhibit_manager_v1 *idle_inhibit_v1;
 	struct wl_listener new_idle_inhibitor_v1;
 	struct wl_list inhibitors;
+	/* Control-socket connections holding the idle off (INHIBIT): the
+	 * session's org.freedesktop.ScreenSaver service, for programs that are
+	 * not Wayland clients (Wine's power requests, X11 programs). */
+	int control_inhibitors;
 
 	enum cg_multi_output_mode output_mode;
 	struct wlr_output_layout *output_layout;
