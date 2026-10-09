@@ -108,14 +108,55 @@ handle_watcher_event(int fd, uint32_t mask, void *data)
 }
 
 static void
-notify_watchers(struct cg_lock *lock, const char *event)
+send_watchers(struct wl_list *list, const char *event)
 {
 	struct cg_watcher *w, *tmp;
-	wl_list_for_each_safe (w, tmp, &lock->watchers, link) {
+	wl_list_for_each_safe (w, tmp, list, link) {
 		if (send(w->fd, event, strlen(event), MSG_NOSIGNAL) < 0) {
 			watcher_free(w);
 		}
 	}
+}
+
+/* The session as its programs see it: locked by the user (a secure prompt
+ * or the security screen is not a lock to them), taken by Remote Desktop,
+ * viewed remotely. */
+static bool
+session_locked(struct cg_lock *lock)
+{
+	return lock->locked && !lock->secure && !lock->sas;
+}
+
+void
+lock_session_update(struct cg_lock *lock)
+{
+	struct cg_server *server = lock->server;
+	bool locked = session_locked(lock), remote = server->remote, shadow = server->shadow_client != NULL;
+
+	/* Remote Desktop's coming and going first: the session moves, then it
+	 * is locked or unlocked where it now is. */
+	if (remote != lock->told_remote) {
+		lock->told_remote = remote;
+		send_watchers(&lock->session_watchers, remote ? "remote-connect\n" : "remote-disconnect\n");
+	}
+#ifdef SG_MUTANT_SESSION_NO_LOCK
+	locked = lock->told_locked;
+#endif
+	if (locked != lock->told_locked) {
+		lock->told_locked = locked;
+		send_watchers(&lock->session_watchers, locked ? "lock\n" : "unlock\n");
+	}
+	if (shadow != lock->told_shadow) {
+		lock->told_shadow = shadow;
+		send_watchers(&lock->session_watchers, shadow ? "shadow-start\n" : "shadow-end\n");
+	}
+}
+
+static void
+notify_watchers(struct cg_lock *lock, const char *event)
+{
+	send_watchers(&lock->watchers, event);
+	lock_session_update(lock);
 }
 
 struct cg_privileged_client {
@@ -262,6 +303,7 @@ remote_attach(struct cg_server *server, char *reply, size_t len)
 		server->remote = true;
 		AUDIT("remote desktop took the session (%s, %dx%d)", wlr_output->name, box.width, box.height);
 		lock_release(&server->lock);
+		lock_session_update(&server->lock);
 		view_position_all(server);
 		wlr_seat_pointer_notify_clear_focus(server->seat->seat);
 	}
@@ -287,6 +329,7 @@ remote_detach(struct cg_server *server, const char *why)
 	}
 	AUDIT("remote desktop gave the session back (%s)", why);
 	/* Locked before the windows come back to the console. */
+	lock_session_update(&server->lock);
 	lock_engage(&server->lock);
 	if (wlr_output) {
 		wlr_output_destroy(wlr_output);
@@ -394,6 +437,7 @@ handle_shadow_client_destroy(struct wl_listener *listener, void *data)
 	server->shadow_control = false;
 	shadow_frame_show(server, false);
 	AUDIT("remote view ended");
+	lock_session_update(&server->lock);
 }
 
 void
@@ -440,6 +484,7 @@ shadow_attach(struct cg_lock *lock, int fd, bool control, char *reply, size_t le
 	wl_client_add_destroy_listener(client, &server->shadow_client_destroy);
 	shadow_frame_show(server, true);
 	AUDIT("remote view started (%s)", control ? "view and control" : "view only");
+	lock_session_update(&lock->server->lock);
 
 	wl_list_for_each (output, &server->outputs, link) {
 		if (output->wlr_output->enabled) {
@@ -452,7 +497,7 @@ shadow_attach(struct cg_lock *lock, int fd, bool control, char *reply, size_t le
 	return true;
 }
 
-/* One command per connection: LOCK, UNLOCK, SECURE, RELEASE, SAS <action>, WATCH, INHIBIT, IDLE, STATUS,
+/* One command per connection: LOCK, UNLOCK, SECURE, RELEASE, SAS <action>, WATCH, SESSION, INHIBIT, IDLE, STATUS,
  * REMOTE (optionally with the remote connection's fd), LOCAL, or SHADOW view|control
  * (with the shadow connection's fd). */
 static int
@@ -542,6 +587,27 @@ handle_control_connection(int fd, uint32_t mask, void *data)
 			wl_list_insert(&lock->watchers, &w->link);
 			reply = lock->locked ? "OK locked\n" : "OK unlocked\n";
 			if (send(client_fd, reply, strlen(reply), MSG_NOSIGNAL) < 0) {
+				watcher_free(w);
+			}
+			return 0; /* the connection stays open */
+		}
+	} else if (!strcmp(buf, "SESSION")) {
+		/* Anyone in the session may follow its state, as any Windows
+		 * program may register for session notifications; nothing is
+		 * said of secure prompts or the security screen. */
+		struct cg_watcher *w;
+		char state[96];
+		if (!uid_may_lock(lock, uid) || !(w = calloc(1, sizeof(*w)))) {
+			reply = "ERR not permitted\n";
+		} else {
+			fcntl(client_fd, F_SETFL, fcntl(client_fd, F_GETFL) | O_NONBLOCK);
+			w->fd = client_fd;
+			w->source = wl_event_loop_add_fd(wl_display_get_event_loop(lock->server->wl_display), client_fd,
+							 WL_EVENT_READABLE, handle_watcher_event, w);
+			wl_list_insert(&lock->session_watchers, &w->link);
+			snprintf(state, sizeof(state), "OK session locked=%d remote=%d shadow=%d\n", lock->told_locked,
+				 lock->told_remote, lock->told_shadow);
+			if (send(client_fd, state, strlen(state), MSG_NOSIGNAL) < 0) {
 				watcher_free(w);
 			}
 			return 0; /* the connection stays open */
@@ -1084,6 +1150,7 @@ lock_init(struct cg_lock *lock, struct cg_server *server, const char *lock_socke
 	lock->lock_fd = lock->control_fd = -1;
 	wl_list_init(&lock->privileged);
 	wl_list_init(&lock->watchers);
+	wl_list_init(&lock->session_watchers);
 	wl_display_set_global_filter(server->wl_display, global_filter, lock);
 
 	if (lock_uid) {

@@ -1,3 +1,16 @@
+sg-compositor (0.2.0+sg51) unstable; urgency=medium
+
+  * SESSION on the control socket: the session's own programs (Wine's
+    WTSRegisterSessionNotification, for Chrome, Edge, Firefox, VS Code) are
+    told the state at once and then "lock"/"unlock" when the user locks or
+    unlocks (nothing for a secure prompt or the security screen),
+    "remote-connect"/"remote-disconnect" when Remote Desktop takes the
+    session and gives it back, and "shadow-start"/"shadow-end" while a
+    remote viewer is attached. Anyone in the session may, as with LOCK.
+    test-wtsevents; mutant SG_MUTANT_SESSION_NO_LOCK.
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Fri, 09 Oct 2026 09:35:38 -0700
+
 sg-compositor (0.2.0+sg50) unstable; urgency=medium
 
   * INHIBIT on the control socket: the connection holds the idle

@@ -55,7 +55,19 @@ struct cg_lock {
 	/* WATCH connections: told "locked" / "unlocked" as it happens, so the
 	 * lock service can put up the lock screen when Win+L is pressed. */
 	struct wl_list watchers; /* struct cg_watcher::link */
+
+	/* SESSION connections: the session's own programs (Wine's
+	 * WTSRegisterSessionNotification) told "lock" / "unlock" when the user
+	 * locks or unlocks (not for a secure prompt or the security screen),
+	 * "remote-connect" / "remote-disconnect" when Remote Desktop takes the
+	 * session or gives it back, "shadow-start" / "shadow-end" when a remote
+	 * viewer starts or stops. What they were last told: */
+	struct wl_list session_watchers; /* struct cg_watcher::link */
+	bool told_locked, told_remote, told_shadow;
 };
+
+/* Tells the SESSION watchers what changed since they were last told. */
+void lock_session_update(struct cg_lock *lock);
 
 bool lock_init(struct cg_lock *lock, struct cg_server *server, const char *lock_socket,
 	       const char *control_socket, const char *lock_uid);

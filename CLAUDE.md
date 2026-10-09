@@ -51,6 +51,12 @@ when rebasing onto a newer cage or wlroots. Source file names stay cage's
   stays open (sg-session's `org.freedesktop.ScreenSaver` service: Wine's power
   requests, X11 programs); anyone in the session may, like `LOCK`. `IDLE`
   says whether anything holds it. `test-power` covers both.
+- `SESSION` keeps its connection open and tells the session's programs the
+  session state (`OK session locked=N remote=N shadow=N`, then `lock`,
+  `unlock`, `remote-connect`, `remote-disconnect`, `shadow-start`,
+  `shadow-end` lines) -- Wine's WTSRegisterSessionNotification (wine-sg
+  1704). A secure prompt or the security screen is not a lock to them.
+  Anyone in the session may. `test-wtsevents`.
 - **Authority is `SO_PEERCRED`, never file permissions.** The compositor runs
   as the logged-in user, so that user's programs can reach any socket it
   creates. Anyone in the session may `LOCK`; only `-U`'s uid or root may
