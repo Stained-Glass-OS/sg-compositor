@@ -19,7 +19,7 @@ jobs:
     name: build .deb (Debian trixie)
     runs-on: ubuntu-latest
     container:
-      image: debian:trixie
+      image: public.ecr.aws/docker/library/debian:trixie
       options: --user root
     steps:
       - uses: actions/checkout@v4
