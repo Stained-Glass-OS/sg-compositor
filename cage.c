@@ -7,6 +7,7 @@
  */
 
 #define _POSIX_C_SOURCE 200112L
+#define _DEFAULT_SOURCE /* syscall(): pidfd_open, sg-compositor */
 
 #include "config.h"
 
@@ -17,6 +18,7 @@
 #include <stdlib.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <sys/syscall.h>
 #include <wayland-server-core.h>
 #include <wlr/backend.h>
 #include <wlr/backend/headless.h>
@@ -93,7 +95,9 @@ sigchld_handler(int fd, uint32_t mask, void *data)
 	/* Close Cage's read pipe. */
 	close(fd);
 
-	if (mask & WL_EVENT_HANGUP) {
+	if (mask & WL_EVENT_READABLE) {
+		wlr_log(WLR_DEBUG, "Child process exited");
+	} else if (mask & WL_EVENT_HANGUP) {
 		wlr_log(WLR_DEBUG, "Child process closed normally");
 	} else if (mask & WL_EVENT_ERROR) {
 		wlr_log(WLR_DEBUG, "Connection closed by server");
@@ -123,9 +127,55 @@ set_cloexec(int fd)
 	return true;
 }
 
+/* sg-compositor: the session ends when the primary client (sg-run-explorer)
+ * exits -- watched through a pidfd, which is readable exactly when that
+ * process exits. The upstream pipe ended the session only once every holder
+ * of its write end had gone, and every program the session started inherited
+ * it (wineserver, Wine services, helpers): a sign-out whose explorer exited
+ * left the compositor up, the session never ended (2026-10-09). */
+static int
+pidfd_open_compat(pid_t pid)
+{
+#ifdef SYS_pidfd_open
+	if (getenv("SG_MUTANT_SESSION_END_PIPE_ONLY"))
+		return -1;
+	return (int)syscall(SYS_pidfd_open, pid, 0);
+#else
+	(void)pid;
+	return -1;
+#endif
+}
+
 static bool
 spawn_primary_client(struct cg_server *server, char *argv[], pid_t *pid_out, struct wl_event_source **sigchld_source)
 {
+	int probe = pidfd_open_compat(getpid());
+	if (probe >= 0) {
+		close(probe);
+		pid_t pid = fork();
+		if (pid == 0) {
+			sigset_t set;
+			sigemptyset(&set);
+			sigprocmask(SIG_SETMASK, &set, NULL);
+			execvp(argv[0], argv);
+			wlr_log_errno(WLR_ERROR, "Failed to spawn client");
+			_exit(1);
+		} else if (pid == -1) {
+			wlr_log_errno(WLR_ERROR, "Unable to fork");
+			return false;
+		}
+		*pid_out = pid;
+		int pidfd = pidfd_open_compat(pid);
+		if (pidfd >= 0 && set_cloexec(pidfd)) {
+			struct wl_event_loop *event_loop = wl_display_get_event_loop(server->wl_display);
+			*sigchld_source = wl_event_loop_add_fd(event_loop, pidfd, WL_EVENT_READABLE, sigchld_handler, server);
+			wlr_log(WLR_DEBUG, "Child process created with pid %d (pidfd)", pid);
+			return true;
+		}
+		wlr_log(WLR_ERROR, "pidfd_open failed for the session's client");
+		return false;
+	}
+
 	int fd[2];
 	if (pipe(fd) != 0) {
 		wlr_log(WLR_ERROR, "Unable to create pipe");
