@@ -1864,6 +1864,14 @@ static int paint(void)
 	int busy = 0;
 
 	last_frame = t;
+	/* the X server's order as it is now, before anything is drawn: an order
+	 * changed without an event about a window of ours (or before the one
+	 * that came was read) left a window under the taskbar drawn over it when
+	 * it was next painted -- activated when another window closed (David,
+	 * 2026-10-17; seen on qa3: deskcomp had Notepad above the bar, X not) */
+#ifndef SG_MUTANT_STALE_STACK
+	restack();
+#endif
 	for (int i = 0; i < nwins; i++)
 		if (wins[i].wobbling) { damage_win(&wins[i]); wobble_step(&wins[i], dt); damage_win(&wins[i]); }
 	for (int i = 0; i < nwins; i++) {
