@@ -1,3 +1,16 @@
+sg-compositor (0.2.0+sg54) unstable; urgency=medium
+
+  * Field report 2026-10-17 (sg-deskcomp):
+    - "Lit through the glass" lights whole panes: the picture is split into
+      its panes (between its lead lines) and each pane in the light's reach
+      glows evenly, a step dimmer further off; a picture without lead keeps
+      the round light. Mutant ROUND_LIGHT.
+    - Living glass on a leaded picture (our wallpapers) shows the picture
+      itself away from the windows, so with none open it is the still
+      background; cells only about the windows. Mutant CELLS_ALL_OVER.
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Sat, 17 Oct 2026 11:10:44 -0700
+
 sg-compositor (0.2.0+sg53) unstable; urgency=medium
 
   * The session ends when its primary client (sg-run-explorer) exits, seen

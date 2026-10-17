@@ -55,6 +55,9 @@ int wmain(int argc, WCHAR **argv)
     wc.lpszClassName = L"deskcomp";
     wc.hCursor = LoadCursorW(0, (const WCHAR *)IDC_ARROW);
     RegisterClassW(&wc);
+    /* "wallpaper C:\\x.bmp": the desktop's picture changed, as Settings does it */
+    if (argc >= 3 && !lstrcmpW(argv[1], L"wallpaper"))
+        return !SystemParametersInfoW(SPI_SETDESKWALLPAPER, 0, argv[2], SPIF_UPDATEINIFILE | SPIF_SENDCHANGE);
     if (argc >= 3 && !lstrcmpW(argv[1], L"minimize"))
     {
         HWND w = FindWindowW(L"deskcomp", argv[2]);

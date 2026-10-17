@@ -26,7 +26,7 @@ unset DISPLAY WAYLAND_DISPLAY XAUTHORITY
 
 if [ "${1:-}" = --mutants ]; then
     rc=0
-    for m in STATIC_BACKGROUND NO_BATTERY_SAVER CELLS_EVERY_FRAME PICTURE_COLOURS LIGHT_WHITE; do
+    for m in STATIC_BACKGROUND NO_BATTERY_SAVER CELLS_EVERY_FRAME PICTURE_COLOURS LIGHT_WHITE ROUND_LIGHT CELLS_ALL_OVER; do
         out=$(mktemp /var/tmp/sg-animbg-mutant.XXXXXX)
         cc -std=c11 -O2 -DSG_MUTANT_$m -o "$out" "$HERE/sg-deskcomp.c" -lX11 -lXcomposite -lXdamage -lXfixes -lXrender -lXext -lm \
             || { echo "SKIP: cannot build the mutant"; exit 77; }
@@ -65,6 +65,9 @@ desk=$(find "$WINEPREFIX/drive_c/users" -maxdepth 2 -name Desktop -type d | grep
 mkdir -p "$desk"; echo hello > "$desk/Notes.txt"
 "$WINE" reg add 'HKCU\Software\Wine\Explorer' /v Desktop /d shell /f >/dev/null 2>&1
 "$WINE" reg add 'HKCU\Software\Wine\Explorer\Desktops' /v shell /d 1024x700 /f >/dev/null 2>&1
+# a leaded picture: panes of one glass, 8 px of lead between (the light by panes)
+set -- ; y=8; while [ $y -lt 700 ]; do x=8; while [ $x -lt 1024 ]; do set -- "$@" -draw "rectangle $x,$y $((x + 119)),$((y + 106))"; x=$((x + 128)); done; y=$((y + 115)); done
+convert -size 1024x700 xc:black -fill '#3070c0' "$@" BMP3:"$WINEPREFIX/drive_c/leaded.bmp"
 "$WINE" reg add 'HKCU\Control Panel\Desktop' /v Wallpaper /d 'C:\stripes.bmp' /f >/dev/null 2>&1
 "$WINE" reg add 'HKCU\Control Panel\Desktop' /v WallpaperStyle /d 2 /f >/dev/null 2>&1
 "$WINE" reg add 'HKCU\Software\Stained Glass\Effects' /v AnimatedBackground /t REG_DWORD /d 1 /f >/dev/null 2>&1
@@ -108,6 +111,17 @@ sleep 4; cp "\$D" "$T/dump.c1"; import -window root "$T/c1.png"
 sleep 2; cp "\$D" "$T/dump.c2"
 "$WINE" deskcomp-probe.exe glide Main 420 300 1000
 sleep 1; cp "\$D" "$T/dump.c3"; import -window root "$T/c3.png"
+kill \$CP; sleep 1
+# the light by panes: a leaded picture, the light on a pane of its bottom row
+printf 'shadows=1\nshadow=modern\nanimations=1\nopen=none\nminimize=none\nwobbly=0\nmoving=0\nbackground=light\n' > "$XDG_CONFIG_HOME/stained-glass/effects.conf"
+"$WINE" deskcomp-probe.exe wallpaper 'C:\\leaded.bmp'; sleep 3
+"$DESKCOMP" -dump "\$D" > "$T/deskcomp4.log" 2>&1 & CP=\$!
+sleep 3; glide 120 196 636; sleep 1; import -window root "$T/p1.png"
+kill \$CP; sleep 1
+# living glass on the leaded picture: the picture itself away from the window
+printf 'shadows=1\nshadow=modern\nanimations=1\nopen=none\nminimize=none\nwobbly=0\nmoving=0\nbackground=cells\n' > "$XDG_CONFIG_HOME/stained-glass/effects.conf"
+"$DESKCOMP" -dump "\$D" > "$T/deskcomp5.log" 2>&1 & CP=\$!
+sleep 4; import -window root "$T/p2.png"
 kill \$CP
 EOF2
 chmod +x "$T/session.sh"
@@ -183,5 +197,24 @@ top=$(row c3 360 440 296)
 [ "${top:-0}" -ge 95 ] && pass "and the lead line is along its new place ($top %)" || fail "after the drag: ${top:-?} % of the row above it dark"
 
 echo
+# a pane lit evenly, as glass is (David 2026-10-17: "the full glass segment
+# glow"): the pane beside the light, its near and far edges alike; a round
+# light (SG_MUTANT_ROUND_LIGHT) makes the near edge much the brighter
+if [ -f "$T/p1.png" ]; then
+    pn=$(lum p1 272 636); pf=$(lum p1 376 636); po=$(lum p1 960 170)
+    [ $((pn - pf)) -le 8 ] && [ $((pf - pn)) -le 8 ] && [ $((pn - po)) -gt 20 ] \
+        && pass "the light lights a pane evenly: its near edge $pn, far edge $pf (unlit glass $po)" \
+        || fail "the pane is not lit evenly: near edge $pn, far edge $pf (unlit glass $po)"
+else fail "no picture of the light by panes: $(tail -2 "$T/deskcomp4.log" 2>/dev/null)"; fi
+# living glass on a leaded picture (our wallpapers): away from the windows the
+# picture as it is -- with no window open, the still background (David
+# 2026-10-17); by the window, its cells (SG_MUTANT_CELLS_ALL_OVER: cells all over)
+if [ -f "$T/p2.png" ]; then
+    far=$(px p2 960 170); near=$(px p2 405 420)
+    fr_=$(echo "$far" | awk -F, '{ d = ($1 - 48) ^ 2 + ($2 - 112) ^ 2 + ($3 - 192) ^ 2; print (d < 150) ? "same" : "other" }')
+    nr_=$(echo "$near" | awk -F, '{ d = ($1 - 48) ^ 2 + ($2 - 112) ^ 2 + ($3 - 192) ^ 2; print (d < 150) ? "same" : "other" }')
+    [ "$fr_" = same ] && [ "$nr_" = other ] && pass "living glass on a leaded picture: the picture itself away from the window ($far), cells beside it ($near)" \
+        || fail "living glass on a leaded picture: away from the window $far, beside it $near (the picture: 48,112,192)"
+else fail "no picture of living glass on the leaded picture"; fi
 [ "$RC" -eq 0 ] && echo "RESULT: PASS" || echo "RESULT: FAIL"
 exit "$RC"

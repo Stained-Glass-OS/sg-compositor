@@ -973,8 +973,11 @@ static int light_x, light_y, light_r;
 static Picture glow_pict, glow_src;   /* the picture blurred: light's colour spilling */
 static Pixmap glow_pixmap;
 
+static void free_panes(void);
+
 static void free_glow(void)
 {
+	free_panes();
 	if (glow_pict) XRenderFreePicture(dpy, glow_pict);
 	if (glow_pixmap) XFreePixmap(dpy, glow_pixmap);
 	glow_pict = glow_src = 0;
@@ -1012,6 +1015,185 @@ static Picture glow_of(Picture base)
 	set_scale(glow_pict, 1.0 / 16, "bilinear");
 	glow_src = base;
 	return glow_pict;
+}
+
+/* ---- the light by panes ----
+ * Real stained glass glows a whole pane at a time (David 2026-10-17: "the
+ * full glass segment glow if in range of the light, as is the effect is too
+ * round"). The picture is split once into its panes -- the regions between
+ * its dark lead lines, at a quarter of its size -- and each pane whose middle
+ * is in the light's reach is lit evenly, brighter the nearer it is. A pane
+ * too large to be a pane (a photograph: no lead) and the lead itself take
+ * the light by their own place, the round light as before. */
+#define PANE_SCALE 4
+static Picture panes_src;
+static unsigned short *pane_label;          /* 0: lead */
+static int pane_w, pane_h, pane_n, pane_leaded;
+static float *pane_cx, *pane_cy;
+static unsigned char *pane_big;
+static XRectangle *pane_box;                /* each pane's extent, full size */
+static float *pane_lev;                     /* each pane's light, last drawn */
+static Pixmap pane_lit_pm, pane_veil_pm;
+static Picture pane_lit, pane_veil;
+static unsigned char *pane_lit_px, *pane_veil_px;
+static GC pane_gc;
+
+static void free_panes(void)
+{
+	if (pane_lit) XRenderFreePicture(dpy, pane_lit);
+	if (pane_veil) XRenderFreePicture(dpy, pane_veil);
+	if (pane_lit_pm) XFreePixmap(dpy, pane_lit_pm);
+	if (pane_veil_pm) XFreePixmap(dpy, pane_veil_pm);
+	if (pane_gc) XFreeGC(dpy, pane_gc);
+	free(pane_label); free(pane_cx); free(pane_cy); free(pane_big); free(pane_box); free(pane_lev);
+	free(pane_lit_px); free(pane_veil_px);
+	pane_label = NULL; pane_cx = pane_cy = pane_lev = NULL; pane_big = NULL; pane_box = NULL;
+	pane_lit_px = pane_veil_px = NULL;
+	pane_lit = pane_veil = 0; pane_lit_pm = pane_veil_pm = 0; pane_gc = 0;
+	pane_n = 0; panes_src = 0; pane_leaded = 0;
+}
+
+static int make_panes(Picture base)
+{
+	Pixmap pm;
+	Picture p;
+	XImage *im;
+	int w, h, n = 0, *stack, i;
+	double *sx, *sy, *cnt;
+	int *x0, *y0, *x1, *y1;
+	XRenderPictureAttributes pad = { .repeat = RepeatPad };
+	if (panes_src == base) return pane_n > 0;
+	free_panes();
+	panes_src = base;
+#ifdef SG_MUTANT_ROUND_LIGHT
+	return 0;
+#endif
+	w = pane_w = dw / PANE_SCALE + 1; h = pane_h = dh / PANE_SCALE + 1;
+	pm = XCreatePixmap(dpy, desktop, w, h, depth);
+	p = XRenderCreatePicture(dpy, pm, format, 0, NULL);
+	XRenderSetPictureFilter(dpy, base, "fast", NULL, 0);
+	set_transform(base, PANE_SCALE, 0, 0, 0, PANE_SCALE, 0);
+	XRenderComposite(dpy, PictOpSrc, base, None, p, 0, 0, 0, 0, 0, 0, w, h);
+	reset_transform(base);
+	im = XGetImage(dpy, pm, 0, 0, w, h, AllPlanes, ZPixmap);
+	XRenderFreePicture(dpy, p);
+	XFreePixmap(dpy, pm);
+	if (!im) return 0;
+	if (im->bits_per_pixel != 32) { XDestroyImage(im); return 0; }
+	pane_label = calloc((size_t)w * h, sizeof(*pane_label));
+	stack = malloc(sizeof(int) * (size_t)w * h);
+	if (!pane_label || !stack) { free(stack); XDestroyImage(im); return 0; }
+	/* lead: the dark lines */
+	for (i = 0; i < w * h; i++) {
+		uint32_t v = *(uint32_t *)(im->data + (i / w) * im->bytes_per_line + (i % w) * 4);
+		int lum = (((v >> 16) & 255) * 3 + ((v >> 8) & 255) * 6 + (v & 255)) / 10;
+		pane_label[i] = lum < 56 ? 0 : 0xffff;
+	}
+	XDestroyImage(im);
+	/* the panes: the glass between, each filled from a seed */
+	for (i = 0; i < w * h && n < 0xfffe; i++) {
+		int top = 0;
+		if (pane_label[i] != 0xffff) continue;
+		n++;
+		pane_label[i] = n; stack[top++] = i;
+		while (top) {
+			int q = stack[--top], qx = q % w, qy = q / w;
+			if (qx > 0 && pane_label[q - 1] == 0xffff) { pane_label[q - 1] = n; stack[top++] = q - 1; }
+			if (qx < w - 1 && pane_label[q + 1] == 0xffff) { pane_label[q + 1] = n; stack[top++] = q + 1; }
+			if (qy > 0 && pane_label[q - w] == 0xffff) { pane_label[q - w] = n; stack[top++] = q - w; }
+			if (qy < h - 1 && pane_label[q + w] == 0xffff) { pane_label[q + w] = n; stack[top++] = q + w; }
+		}
+	}
+	for (i = 0; i < w * h; i++) if (pane_label[i] == 0xffff) pane_label[i] = 0;
+	free(stack);
+	pane_n = n;
+	sx = calloc(n + 1, sizeof(double)); sy = calloc(n + 1, sizeof(double)); cnt = calloc(n + 1, sizeof(double));
+	x0 = malloc((n + 1) * sizeof(int)); y0 = malloc((n + 1) * sizeof(int)); x1 = calloc(n + 1, sizeof(int)); y1 = calloc(n + 1, sizeof(int));
+	pane_cx = calloc(n + 1, sizeof(float)); pane_cy = calloc(n + 1, sizeof(float)); pane_lev = calloc(n + 1, sizeof(float));
+	pane_big = calloc(n + 1, 1); pane_box = calloc(n + 1, sizeof(XRectangle));
+	pane_lit_px = malloc((size_t)w * h); pane_veil_px = malloc((size_t)w * h);
+	if (!sx || !sy || !cnt || !x0 || !y0 || !x1 || !y1 || !pane_cx || !pane_cy || !pane_lev || !pane_big || !pane_box || !pane_lit_px || !pane_veil_px) {
+		free(sx); free(sy); free(cnt); free(x0); free(y0); free(x1); free(y1);
+		pane_n = 0; return 0;
+	}
+	for (i = 0; i <= n; i++) { x0[i] = w; y0[i] = h; }
+	for (i = 0; i < w * h; i++) {
+		int l = pane_label[i], x = i % w, y = i / w;
+		sx[l] += x; sy[l] += y; cnt[l] += 1;
+		if (x < x0[l]) x0[l] = x;
+		if (y < y0[l]) y0[l] = y;
+		if (x > x1[l]) x1[l] = x;
+		if (y > y1[l]) y1[l] = y;
+	}
+	{
+		double small = 0;
+		for (i = 1; i <= n; i++) if (cnt[i] <= (double)w * h / 20) small += cnt[i];
+		pane_leaded = n >= 20 && small > 0.5 * w * h;
+	}
+	for (i = 1; i <= n; i++) {
+		pane_cx[i] = (float)((sx[i] / cnt[i] + 0.5) * PANE_SCALE);
+		pane_cy[i] = (float)((sy[i] / cnt[i] + 0.5) * PANE_SCALE);
+		pane_big[i] = cnt[i] > (double)w * h / 20;      /* more than a twentieth: no pane */
+		pane_box[i] = (XRectangle){ x0[i] * PANE_SCALE, y0[i] * PANE_SCALE,
+		                            (x1[i] - x0[i] + 1) * PANE_SCALE, (y1[i] - y0[i] + 1) * PANE_SCALE };
+		pane_lev[i] = -1;
+	}
+	free(sx); free(sy); free(cnt); free(x0); free(y0); free(x1); free(y1);
+	pane_lit_pm = XCreatePixmap(dpy, desktop, w, h, 8);
+	pane_veil_pm = XCreatePixmap(dpy, desktop, w, h, 8);
+	pane_gc = XCreateGC(dpy, pane_lit_pm, 0, NULL);
+	pane_lit = XRenderCreatePicture(dpy, pane_lit_pm, a8_format, CPRepeat, &pad);
+	pane_veil = XRenderCreatePicture(dpy, pane_veil_pm, a8_format, CPRepeat, &pad);
+	set_scale(pane_lit, 1.0 / PANE_SCALE, "bilinear");
+	set_scale(pane_veil, 1.0 / PANE_SCALE, "bilinear");
+	return 1;
+}
+
+/* how lit at a distance d from the light of reach r: full near, none far */
+static float pane_level(float d, float r)
+{
+	if (d <= 0.55f * r) return 1;
+	if (d >= 1.25f * r) return 0;
+	return (1.25f * r - d) / (0.7f * r);
+}
+
+/* the masks for a light at (x, y), reach r; *box grows to take in every pane
+ * whose light changed */
+static void light_panes(int x, int y, int r, XRectangle *box)
+{
+	int w = pane_w, h = pane_h, i, l;
+	float *lev = malloc((pane_n + 1) * sizeof(float));
+	int bx0 = box->x, by0 = box->y, bx1 = box->x + box->width, by1 = box->y + box->height;
+	XImage *im;
+	if (!lev) return;
+	for (l = 1; l <= pane_n; l++) {
+		float dx = pane_cx[l] - x, dy = pane_cy[l] - y;
+		lev[l] = pane_big[l] ? -1 : (float)((int)(pane_level(sqrtf(dx * dx + dy * dy), r) * 8 + 0.5f)) / 8;
+		if (!pane_big[l] && lev[l] != pane_lev[l]) {
+			XRectangle *b = &pane_box[l];
+			if (b->x < bx0) bx0 = b->x;
+			if (b->y < by0) by0 = b->y;
+			if (b->x + b->width > bx1) bx1 = b->x + b->width;
+			if (b->y + b->height > by1) by1 = b->y + b->height;
+			pane_lev[l] = lev[l];
+		}
+	}
+	box->x = bx0; box->y = by0; box->width = bx1 - bx0; box->height = by1 - by0;
+	for (i = 0; i < w * h; i++) {
+		float v;
+		l = pane_label[i];
+		if (!l || pane_big[l]) {
+			float dx = (i % w + 0.5f) * PANE_SCALE - x, dy = (i / w + 0.5f) * PANE_SCALE - y;
+			v = pane_level(sqrtf(dx * dx + dy * dy), r);
+		} else v = lev[l];
+		pane_lit_px[i] = (unsigned char)(v * 0x90);
+		pane_veil_px[i] = (unsigned char)((1 - v) * 255);
+	}
+	free(lev);
+	im = XCreateImage(dpy, DefaultVisual(dpy, DefaultScreen(dpy)), 8, ZPixmap, 0, (char *)pane_lit_px, w, h, 8, w);
+	if (im) { XPutImage(dpy, pane_lit_pm, pane_gc, im, 0, 0, 0, 0, w, h); im->data = NULL; XDestroyImage(im); }
+	im = XCreateImage(dpy, DefaultVisual(dpy, DefaultScreen(dpy)), 8, ZPixmap, 0, (char *)pane_veil_px, w, h, 8, w);
+	if (im) { XPutImage(dpy, pane_veil_pm, pane_gc, im, 0, 0, 0, 0, w, h); im->data = NULL; XDestroyImage(im); }
 }
 
 static Picture radial(int x, int y, int r, int n, const double *at, const unsigned short *alpha, int pad)
@@ -1230,13 +1412,20 @@ static int pointer_at(int *x, int *y)
 #define MAX_SITES 2000
 #define MAX_PANES 64
 #define PANE_GAP 3
-struct site { float x, y; uint32_t color; };
+struct site { float x, y; uint32_t color; int near; };   /* near: by a window */
 static struct site base_sites[MAX_SITES], sites[MAX_SITES];
 static int nbase, nsites, spacing;
 struct pane { unsigned long id; int x0, y0, x1, y1; };   /* x1, y1: past the end */
 static struct pane panes[MAX_PANES], drawn_panes[MAX_PANES];
 static int npanes, ndrawn_panes, cells_drawn;
 static uint32_t *cells_data;
+/* a leaded picture (our own wallpapers: panes of glass in lead) is the glass
+ * itself: away from the windows the cells show it as it is, so with no
+ * window open the living glass is the still picture (David 2026-10-17); a
+ * picture without lead (a photograph) is made into cells all over */
+static uint32_t *pic_data;
+static Picture pic_src;
+static int pic_leaded;
 static double cells_last;
 
 static uint32_t hash32(uint32_t v) { v ^= v >> 16; v *= 0x7feb352d; v ^= v >> 15; v *= 0x846ca68b; v ^= v >> 16; return v; }
@@ -1364,8 +1553,10 @@ static void place_sites(void)
 			}
 	}
 	for (int i = 0; i < nbase && n < MAX_SITES; i++)
-		if (!in_pane(base_sites[i].x, base_sites[i].y, spacing * 2 / 3))
-			sites[n++] = base_sites[i];
+		if (!in_pane(base_sites[i].x, base_sites[i].y, spacing * 2 / 3)) {
+			sites[n] = base_sites[i];
+			sites[n++].near = in_pane(base_sites[i].x, base_sites[i].y, spacing * 3 / 2);
+		}
 	for (int p = 0; p < npanes; p++) {
 		struct pane *q = &panes[p];
 		int step = spacing * 9 / 20, k = 0;
@@ -1383,7 +1574,7 @@ static void place_sites(void)
 				else if (side == 2) { x = q->x0 - depth; y = q->y0 + along; }
 				else { x = q->x1 + depth; y = q->y0 + along; }
 				if (in_pane(x, y, 2)) continue;
-				sites[n].x = x; sites[n].y = y; sites[n].color = 0; n++;
+				sites[n].x = x; sites[n].y = y; sites[n].color = 0; sites[n].near = 1; n++;
 			}
 		}
 	}
@@ -1457,6 +1648,9 @@ static void render_cells_box(int bx0, int by0, int bx1, int by1)
 				if (second >= 0 && d2 < (float)(r * bs) * (r * bs)) break;
 			}
 			if (best < 0) { *out = 0x221e28; continue; }
+#ifndef SG_MUTANT_CELLS_ALL_OVER
+			if (pic_leaded && pic_data && !sites[best].near) { *out = pic_data[(size_t)y * dw + x]; continue; }
+#endif
 			{
 				float edge = 99, lead, shade;
 				uint32_t c = sites[best].color;
@@ -1519,6 +1713,27 @@ static void render_cells(int all)
 		all = 1;
 	}
 	if (!cells_data) return;
+	{
+		Picture base = wp_pict ? wp_pict : bg_pict;
+		if (base != pic_src || all) {
+			free(pic_data); pic_data = NULL;
+			pic_src = base;
+			pic_leaded = base && make_panes(base) && pane_leaded;
+			if (pic_leaded) {
+				Pixmap pm = XCreatePixmap(dpy, desktop, dw, dh, depth);
+				Picture p = XRenderCreatePicture(dpy, pm, format, 0, NULL);
+				XImage *im;
+				XRenderComposite(dpy, PictOpSrc, base, None, p, 0, 0, 0, 0, 0, 0, dw, dh);
+				im = XGetImage(dpy, pm, 0, 0, dw, dh, AllPlanes, ZPixmap);
+				if (im && im->bits_per_pixel == 32 && (pic_data = malloc((size_t)dw * dh * 4)))
+					for (int y = 0; y < dh; y++) memcpy(pic_data + (size_t)y * dw, im->data + (size_t)y * im->bytes_per_line, (size_t)dw * 4);
+				if (im) XDestroyImage(im);
+				XRenderFreePicture(dpy, p);
+				XFreePixmap(dpy, pm);
+			}
+			all = 1;
+		}
+	}
 	place_sites();
 	if (all) render_cells_box(0, 0, dw, dh);
 	else {
@@ -1556,6 +1771,7 @@ static void animate(double t)
 		if (x != light_x || y != light_y || r != light_r) {
 			/* all the light touches: its colours spill to twice its radius */
 			XRectangle box = { x - 2 * r, y - 2 * r, 4 * r, 4 * r };
+			if (make_panes(wp_pict ? wp_pict : bg_pict)) light_panes(x, y, r, &box);
 			if (light_box.width) damage_uncovered(&light_box);
 			damage_uncovered(&box);
 			light_box = box;
@@ -1610,9 +1826,12 @@ static void draw_background(void)
 			static const double veil_at[] = { 0, 0.55, 1 }, lit_at[] = { 0, 0.45, 1 }, glow_at[] = { 0, 0.5, 1 };
 			static const unsigned short veil_a[] = { 0, 0x5800, 0xffff };
 			static const unsigned short lit_a[] = { 0x9000, 0x5800, 0 }, glow_a[] = { 0x6000, 0x2800, 0 };
-			Picture veil = radial(light_x, light_y, light_r, 3, veil_at, veil_a, 1);
-			Picture lit = radial(light_x, light_y, light_r, 3, lit_at, lit_a, 0);
-			Picture spill = radial(light_x, light_y, light_r * 2, 3, glow_at, glow_a, 0);
+			static const unsigned short glow_a_panes[] = { 0x2800, 0x1000, 0 };
+			/* by panes (above) when the picture has them, else a round light */
+			int panes = make_panes(base) && panes_src == base;
+			Picture veil = panes ? pane_veil : radial(light_x, light_y, light_r, 3, veil_at, veil_a, 1);
+			Picture lit = panes ? pane_lit : radial(light_x, light_y, light_r, 3, lit_at, lit_a, 0);
+			Picture spill = radial(light_x, light_y, light_r * 2, 3, glow_at, panes ? glow_a_panes : glow_a, 0);
 			XRenderComposite(dpy, PictOpOver, shade, veil, buffer_pict, 0, 0, 0, 0, 0, 0, dw, dh);
 			XRenderComposite(dpy, PictOpAdd, base, lit, buffer_pict, 0, 0, 0, 0, 0, 0, dw, dh);
 #ifndef SG_MUTANT_LIGHT_WHITE
@@ -1626,8 +1845,7 @@ static void draw_background(void)
 			}
 #endif
 			XRenderFreePicture(dpy, spill);
-			XRenderFreePicture(dpy, lit);
-			XRenderFreePicture(dpy, veil);
+			if (!panes) { XRenderFreePicture(dpy, lit); XRenderFreePicture(dpy, veil); }
 		} else
 			XRenderComposite(dpy, PictOpOver, shade, None, buffer_pict, 0, 0, 0, 0, 0, 0, dw, dh);
 		XRenderFreePicture(dpy, shade);
