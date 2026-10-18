@@ -5,7 +5,9 @@
 # list is an override-redirect X window. It used to take the focus when it
 # appeared -- so Wine closed it at once -- and the next click, with nothing
 # focused, crashed the compositor (a NULL view in press_cursor_button).
-# Here a combo box is opened and a choice made with a virtual pointer.
+# Here a combo box is opened and a choice made with a virtual pointer; then a
+# popup menu (TrackPopupMenu, as the login screen's Shut down / Restart) is
+# opened and its second item clicked.
 set -u
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 COMP="${SG_COMPOSITOR_BIN:-$HERE/build/sg-compositor}"
@@ -51,6 +53,19 @@ wait_for SEL 20 && pass "a click on an item chooses it ($(tr -d '\r' < "$T/out" 
 ptr m 500 300 d s 50 u; sleep 1
 ptr m 500 300 d s 50 u; sleep 1
 alive && pass "clicks after the list closed do not crash the compositor" || fail "the compositor crashed after the list closed"
+
+# a popup menu (the login screen's power button: Shut down, Restart) picked by
+# a click: clicking it gave it the focus, its owner lost it and Wine closed the
+# menu before the click reached it (David, 2026-10-18); SG_MUTANT_FOCUS_OR_POPUP
+wait_for MENUBTN 20 || fail "no menu button"
+set -- $(tr -d '\r' < "$T/out" | grep '^MENUBTN' | tail -1)
+[ $# -eq 5 ] && ptr m $(( $2 + $4 / 2 )) $(( $3 + $5 / 2 )) d s 50 u
+wait_for MENU 20 && pass "the button opens its menu" || fail "no menu opened"
+set -- $(tr -d '\r' < "$T/out" | grep '^MENU ' | tail -1)
+[ $# -eq 5 ] && ptr m $(( $2 + $4 / 2 )) $(( $3 + $5 * 3 / 4 )) d s 50 u
+wait_for CMD 20
+[ "$(tr -d '\r' < "$T/out" | grep '^CMD' | tail -1)" = "CMD 202" ] && pass "a click on the menu's Restart chooses it" \
+    || fail "the menu's click: $(tr -d '\r' < "$T/out" | grep '^CMD' | tail -1) (want CMD 202)"
 
 echo
 if [ "$RC" -eq 0 ]; then echo "RESULT: PASS"; else echo "RESULT: FAIL"; fi

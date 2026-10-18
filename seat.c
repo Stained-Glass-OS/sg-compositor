@@ -132,6 +132,19 @@ press_cursor_button(struct cg_seat *seat, struct wlr_input_device *device, uint3
 		   it has no open dialogs. */
 		/* sg-compositor: nothing may have the focus (the popup that had
 		   it is gone) -- a click then focuses what it lands on. */
+#if CAGE_HAS_XWAYLAND
+		/* sg-compositor: an X popup -- override-redirect: a menu, a
+		 * tooltip, a drop-down -- clicked keeps the focus where it is. Given
+		 * the focus, the window it belongs to lost it and Wine closed the
+		 * menu before the click reached it: the login screen's Shut down
+		 * and Restart did nothing (David, 2026-10-18). */
+#ifndef SG_MUTANT_FOCUS_OR_POPUP
+		if (view && view->type == CAGE_XWAYLAND_VIEW &&
+		    xwayland_view_from_view(view)->xwayland_surface->override_redirect) {
+			return;
+		}
+#endif
+#endif
 		if (view && (!current || !view_is_transient_for(current, view))) {
 			seat_set_focus(seat, view);
 			/* sg-compositor: a program's native Wayland window clicked

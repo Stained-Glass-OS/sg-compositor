@@ -1,3 +1,14 @@
+sg-compositor (0.2.0+sg56) unstable; urgency=medium
+
+  * A click on an X popup (override-redirect: a menu, a tooltip, a list)
+    keeps the keyboard focus where it is. The login screen's power menu
+    took it, the login window lost it and Wine closed the menu before the
+    click reached it: Shut down and Restart did nothing (David, 2026-10-18).
+    popup-gate: a popup menu's item chosen by a click; mutant
+    SG_MUTANT_FOCUS_OR_POPUP.
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Sun, 18 Oct 2026 11:13:45 -0700
+
 sg-compositor (0.2.0+sg55) unstable; urgency=medium
 
   * sg-deskcomp reads the X server's stacking order again before each frame
