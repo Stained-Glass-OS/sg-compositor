@@ -95,14 +95,25 @@ is_transient_for(struct cg_view *child, struct cg_view *parent)
 	return false;
 }
 
+void
+xwayland_surface_restack_above(struct wlr_xwayland_surface *xs)
+{
+#ifndef SG_MUTANT_RESTACK_OVERRIDE_REDIRECT
+	if (xs->override_redirect) {
+		return;
+	}
+#endif
+	wlr_xwayland_surface_restack(xs, NULL, XCB_STACK_MODE_ABOVE);
+}
+
 static void
 activate(struct cg_view *view, bool activate)
 {
 	struct cg_xwayland_view *xwayland_view = xwayland_view_from_view(view);
 	wlr_xwayland_surface_activate(xwayland_view->xwayland_surface, activate);
 	/* sg-compositor: the window activated is on top for X too (clicks) */
-	if (activate && !view->elevated && !xwayland_view->xwayland_surface->override_redirect)
-		wlr_xwayland_surface_restack(xwayland_view->xwayland_surface, NULL, XCB_STACK_MODE_ABOVE);
+	if (activate && !view->elevated)
+		xwayland_surface_restack_above(xwayland_view->xwayland_surface);
 	decor_set_active(view, activate);
 }
 
@@ -252,7 +263,7 @@ handle_xwayland_surface_map(struct wl_listener *listener, void *data)
 			view_position(view);
 		}
 		wlr_xwayland_surface_configure(xs, view->lx, view->ly, xs->width, xs->height);
-		wlr_xwayland_surface_restack(xs, NULL, XCB_STACK_MODE_ABOVE);
+		xwayland_surface_restack_above(xs);
 		/* the taskbar frames it in a moment: shown then, in its frame */
 		session_x11_hold(view);
 	}

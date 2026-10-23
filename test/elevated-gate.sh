@@ -17,6 +17,9 @@
 #   5. a lock hides it and keeps its keys; it comes back on unlock
 #   5b. a click on its dialog reaches the dialog, whatever order its X
 #      windows were made in (the X server's stacking follows the screen's)
+#   5c. an override-redirect popup of it (a menu, a tooltip) is shown, and
+#      the compositor lives on (it aborted restacking one: qa5 2026-10-22,
+#      DYMO Connect's elevated installer ended the whole session)
 #   6. the display ends with the program; only SYSTEM or root may hand one over
 #
 # A build that puts the elevated program on the session's display must fail
@@ -284,6 +287,22 @@ else fail "a click on its dialog went to: $(sed -n 's/^CLICK //p' "$T/e/dialog.l
 if grep -qx 'CLICK main' "$T/e/dialog.log" 2>/dev/null; then pass "and a click beside the dialog, its main window"
 else fail "a click on the main window beside its dialog did not reach it"; fi
 sudo -n pkill -u "$EUSER" -f "$T/fx dialog"
+sleep 1
+
+# --- 5c. An override-redirect popup of it ----------------------------------
+# A menu, tooltip or combo box list of an elevated program: X does not let a
+# window manager restack such a window, and wlroots asserts if asked to.
+as_e DISPLAY="$EDPY" XAUTHORITY="$EAUTH" "$T/fx" popup "$T/e/popup.log" >/dev/null 2>&1 &
+_w=0; while ! grep -q '^MAPPED' "$T/e/popup.log" 2>/dev/null && [ $_w -lt 30 ]; do sleep 0.5; _w=$((_w+1)); done
+sleep 1
+if kill -0 "$CPID" 2>/dev/null; then pass "an elevated override-redirect popup leaves the compositor running"
+else fail "the compositor died at an elevated popup: $(grep -i assert "$T/comp.log" | tail -1)"; exit 1; fi
+as_e WAYLAND_DISPLAY="$T/priv.sock" grim "$T/e/popup.png" 2>/dev/null
+# blue is a third of the channels: 150x80 all blue is 4000
+blue=$(convert "$T/e/popup.png" -crop 150x80+650+220 -fill black +opaque '#0000ff' -format '%[fx:mean*w*h]' info: 2>/dev/null | cut -d. -f1)
+if [ "${blue:-0}" -gt 3000 ]; then pass "and the popup is on screen (${blue} blue)"
+else fail "the popup is not on screen (${blue:-0} blue)"; fi
+sudo -n pkill -u "$EUSER" -f "$T/fx popup"
 sleep 1
 
 # --- 6. Who may hand one over; the display ends with the program -----------

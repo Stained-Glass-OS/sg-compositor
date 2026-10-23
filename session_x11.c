@@ -259,7 +259,7 @@ session_x11_activate(struct cg_server *server, unsigned long window)
 	}
 	/* X's stacking as the screen's: the shell's desktop may have been
 	 * brought above it (XDESKTOP) */
-	wlr_xwayland_surface_restack(xwayland_view_from_view(view)->xwayland_surface, NULL, XCB_STACK_MODE_ABOVE);
+	xwayland_surface_restack_above(xwayland_view_from_view(view)->xwayland_surface);
 	seat_set_focus(server->seat, view);
 	return true;
 }
@@ -283,7 +283,7 @@ session_x11_desktop_front(struct cg_server *server)
 		if (view->scene_tree) {
 			wlr_scene_node_raise_to_top(&view->scene_tree->node);
 		}
-		wlr_xwayland_surface_restack(xwayland_view_from_view(view)->xwayland_surface, NULL, XCB_STACK_MODE_ABOVE);
+		xwayland_surface_restack_above(xwayland_view_from_view(view)->xwayland_surface);
 #endif
 		seat_set_focus(server->seat, view);
 		return true;

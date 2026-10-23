@@ -528,7 +528,7 @@ elevated_raise(struct cg_view *view)
 	 * follows the screen's, or a click on a dialog reaches the window under
 	 * it (one whose X window was made later, as when Wine re-creates it). */
 	wlr_scene_node_raise_to_top(&view->scene_tree->node);
-	wlr_xwayland_surface_restack(xs, NULL, XCB_STACK_MODE_ABOVE);
+	xwayland_surface_restack_above(xs);
 	wl_list_for_each_reverse (other, &view->server->views, link) {
 		struct wlr_xwayland_surface *p;
 		if (other == view || other->elevated != view->elevated || !other->scene_tree) {
@@ -537,7 +537,7 @@ elevated_raise(struct cg_view *view)
 		for (p = xsurface_of(other)->parent; p; p = p->parent) {
 			if (p == xs) {
 				wlr_scene_node_raise_to_top(&other->scene_tree->node);
-				wlr_xwayland_surface_restack(xsurface_of(other), NULL, XCB_STACK_MODE_ABOVE);
+				xwayland_surface_restack_above(xsurface_of(other));
 				break;
 			}
 		}

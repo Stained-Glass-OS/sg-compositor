@@ -1,3 +1,17 @@
+sg-compositor (0.2.0+sg58) unstable; urgency=medium
+
+  * Elevated programs: an override-redirect window of one (a menu, a
+    tooltip, a combo box's list) no longer aborts the compositor. Every
+    elevated window mapped was raised in X's stacking too, and wlroots
+    asserts on restacking an override-redirect window: the whole session
+    ended at DYMO Connect's elevated installer (qa5 2026-10-22). One
+    helper, xwayland_surface_restack_above, leaves such windows to their
+    program at every call site. Gate test-elevated section 5c (an elevated
+    popup: the compositor lives, the popup is on screen), mutant
+    SG_MUTANT_RESTACK_OVERRIDE_REDIRECT (shown to build; aborts as on qa5).
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Thu, 22 Oct 2026 19:15:00 -0700
+
 sg-compositor (0.2.0+sg57) unstable; urgency=medium
 
   * CI: the Debian trixie container from ghcr.io/stained-glass-os/debian

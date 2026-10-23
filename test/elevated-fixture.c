@@ -18,6 +18,12 @@
  *       program's main window. Appends "MAPPED" once both are shown, then
  *       "CLICK main|dialog" for every left button press.
  *
+ *   elevated-fixture popup LOG
+ *       A window (green, 600,150 300x200) and an override-redirect popup over
+ *       it (blue, 650,220 150x80, transient for it), as a menu, a tooltip or
+ *       a combo box's list of an elevated Wine program is. Appends "MAPPED"
+ *       once both are shown.
+ *
  *   elevated-fixture keypoll LOG
  *       A session keylogger that needs no focus: polls the X server's key
  *       state (what GetAsyncKeyState is built on) and appends "DOWN <keycode>"
@@ -115,6 +121,42 @@ target(const char *log, const char *title, const char *color)
 			fprintf(f, "FOCUS out\n");
 			fflush(f);
 		}
+	}
+}
+
+static int
+popup(const char *log)
+{
+	Display *d = XOpenDisplay(NULL);
+	FILE *f = fopen(log, "a");
+	if (!d || !f) {
+		return 1;
+	}
+	int s = DefaultScreen(d);
+	XColor green, blue, exact;
+	XAllocNamedColor(d, DefaultColormap(d, s), "#00ff00", &green, &exact);
+	XAllocNamedColor(d, DefaultColormap(d, s), "#0000ff", &blue, &exact);
+	Window main_w = XCreateSimpleWindow(d, RootWindow(d, s), 600, 150, 300, 200, 0, 0, green.pixel);
+	XSizeHints mh = {.flags = USPosition | PPosition, .x = 600, .y = 150};
+	XWMHints wm = {.flags = InputHint, .input = True};
+	XSetWMNormalHints(d, main_w, &mh);
+	XStoreName(d, main_w, "sg-elevated-popup-owner");
+	XSetWMHints(d, main_w, &wm);
+	XMapWindow(d, main_w);
+	XSync(d, False);
+	sleep(1);
+	XSetWindowAttributes a = {.override_redirect = True, .background_pixel = blue.pixel};
+	Window pop = XCreateWindow(d, RootWindow(d, s), 650, 220, 150, 80, 0, CopyFromParent, InputOutput,
+				   CopyFromParent, CWOverrideRedirect | CWBackPixel, &a);
+	XSetTransientForHint(d, pop, main_w);
+	XMapRaised(d, pop);
+	XSync(d, False);
+	sleep(1);
+	fprintf(f, "MAPPED\n");
+	fflush(f);
+	for (;;) {
+		XEvent ev;
+		XNextEvent(d, &ev);
 	}
 }
 
@@ -316,6 +358,9 @@ main(int argc, char **argv)
 	}
 	if (argc == 3 && !strcmp(argv[1], "dialog")) {
 		return dialog(argv[2]);
+	}
+	if (argc == 3 && !strcmp(argv[1], "popup")) {
+		return popup(argv[2]);
 	}
 	if (argc == 3 && !strcmp(argv[1], "keypoll")) {
 		return keypoll(argv[2]);

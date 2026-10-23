@@ -31,6 +31,9 @@ struct cg_xwayland_view {
 
 struct cg_xwayland_view *xwayland_view_from_view(struct cg_view *view);
 bool xwayland_view_should_manage(struct cg_view *view);
+/* Puts XS on top of X's stacking; an override-redirect window (a menu, a
+ * tooltip) is its program's to stack, and wlroots asserts if asked. */
+void xwayland_surface_restack_above(struct wlr_xwayland_surface *xs);
 bool xwayland_view_is_shell_desktop(struct cg_view *view);
 void handle_xwayland_surface_new(struct wl_listener *listener, void *data);
 struct cg_elevated;
