@@ -1,3 +1,13 @@
+sg-compositor (0.2.0+sg59) unstable; urgency=medium
+
+  * A Linux program's dialog has a taskbar button when its program's window
+    is not shown. Timeshift shows only its Setup Wizard, transient for a
+    main window it maps later; with no button it could not be brought back
+    from behind another window (qa4). Gate xwindows-gate: a lone dialog is
+    listed, one over its shown window is not; mutant TRANSIENT_ANY.
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Sun, 25 Oct 2026 14:20:30 -0700
+
 sg-compositor (0.2.0+sg58) unstable; urgency=medium
 
   * Elevated programs: an override-redirect window of one (a menu, a

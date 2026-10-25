@@ -5,7 +5,9 @@
 # a Wine program's class (*.exe) -- and XMINIMIZE, XACTIVATE and XCLOSE act
 # on it by its X window id. XKILL (Task Manager's End task on a program that
 # did not close) kills a hung one's process (David 2026-10-02: CPU-X hung and
-# could not be ended); mutant SG_MUTANT_XKILL_DEAF fails it.
+# could not be ended); mutant SG_MUTANT_XKILL_DEAF fails it. A dialog whose
+# program's window is not shown (Timeshift's Setup Wizard) is listed; one over
+# a shown window is not (mutant SG_MUTANT_TRANSIENT_ANY lists neither).
 set -u
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 COMP="${SG_COMPOSITOR_BIN:-$HERE/build/sg-compositor}"
@@ -14,12 +16,13 @@ cleanup() { [ -s "$T/client" ] && kill "$(cat "$T/client")" 2>/dev/null; [ -n "$
 trap cleanup EXIT INT TERM
 pass() { echo "PASS  $*"; }
 fail() { echo "FAIL  $*"; RC=1; }
-for t in grim convert xterm Xwayland python3; do command -v "$t" >/dev/null || { echo "SKIP: $t missing"; exit 77; }; done
+for t in grim convert xterm Xwayland python3 cc; do command -v "$t" >/dev/null || { echo "SKIP: $t missing"; exit 77; }; done
 [ -x "$COMP" ] || { echo "SKIP: no compositor at $COMP"; exit 77; }
+cc -O1 -o "$T/sg-transient" "$HERE/test/sg-transient.c" -lX11 || { echo "SKIP: cannot build sg-transient"; exit 77; }
 
 WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 WLR_RENDERER=pixman \
     "$COMP" -L "$T/priv.sock" -C "$T/ctl.sock" -U "$(id -u)" -- \
-    sh -c "echo \$\$ > $T/client; xterm -class FakeWine.exe -T 'A Wine window' -geometry 20x5 -e sleep 600 & sleep 1; xterm -T 'Hung Program' -geometry 20x5 -e sleep 600 & echo \$! > $T/hung; sleep 1; xterm -T 'Linux Terminal' -geometry 80x24 -bg '#ff0000' -fg '#ff0000' -e sleep 600 & echo up > $T/d; exec sleep 600" \
+    sh -c "echo \$\$ > $T/client; xterm -class FakeWine.exe -T 'A Wine window' -geometry 20x5 -e sleep 600 & sleep 1; xterm -T 'Hung Program' -geometry 20x5 -e sleep 600 & echo \$! > $T/hung; $T/sg-transient & sleep 1.5; xterm -T 'Linux Terminal' -geometry 80x24 -bg '#ff0000' -fg '#ff0000' -e sleep 600 & echo up > $T/d; exec sleep 600" \
     >"$T/log" 2>&1 &
 CP=$!
 _w=0; while [ ! -s "$T/d" ] && [ $_w -lt 50 ]; do sleep 0.2; _w=$((_w+1)); done
@@ -42,6 +45,10 @@ ID=$(awk -F'\t' '$2 == "Linux Terminal" { split($1, f, " "); print f[1] }' "$T/l
     && pass "XWINDOWS lists the Linux program's window: shown, focused, its class and title" || fail "list: $(cat "$T/list")"
 grep -q "A Wine window" "$T/list" && fail "a Wine program's window (*.exe) is listed" || pass "not a Wine program's (*.exe) window"
 [ "$(tail -1 "$T/list")" = END ] && pass "the list ends in END" || fail "no END"
+grep -q "	Lone Dialog$" "$T/list" && pass "a dialog whose program's window is not shown is listed (Timeshift's Setup Wizard)" \
+    || fail "the lone dialog is not listed"
+grep -q "	Main Window$" "$T/list" && ! grep -q "	Owned Dialog$" "$T/list" \
+    && pass "a dialog over its program's shown window is not (the window has the button)" || fail "owned dialog: $(grep -E 'Main Window|Owned Dialog' "$T/list")"
 shot shown
 set -- $(convert "$T/shown.png" -format "%w %h" info:); CX=$(($1 / 2)); CY=$(($2 / 2))
 [ "$(px shown $CX $CY)" = "255,0,0" ] && pass "the terminal is on the screen" || fail "shown: $(px shown $CX $CY)"

@@ -47,7 +47,19 @@ program_surface(struct cg_view *view)
 		return NULL;
 	}
 	xs = xwayland_view_from_view(view)->xwayland_surface;
-	if (!xs || xs->override_redirect || xs->parent || xwayland_view_is_shell_desktop(view)) {
+	if (!xs || xs->override_redirect || xwayland_view_is_shell_desktop(view)) {
+		return NULL;
+	}
+	/* a dialog is its program's window's: no button of its own -- unless
+	 * that window is not shown. Timeshift shows only its Setup Wizard,
+	 * transient for a main window it maps later; with no button the wizard
+	 * could not be brought back from behind another window (qa4). GNOME's
+	 * and KDE's taskbars do the same. */
+#ifdef SG_MUTANT_TRANSIENT_ANY
+	if (xs->parent) {
+#else
+	if (xs->parent && xs->parent->surface && xs->parent->surface->mapped) {
+#endif
 		return NULL;
 	}
 	if (lock_view_is_privileged(&view->server->lock, view)) {
