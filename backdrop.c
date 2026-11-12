@@ -81,6 +81,7 @@ le32(const unsigned char *b)
 static struct pixels *g_picture;
 static float g_color[4] = {0x2a / 255.0f, 0x16 / 255.0f, 0x4c / 255.0f, 1.0f};
 static bool g_loaded;
+static bool g_shell_up;   /* the desktop has been mapped: backdrop_shell_up */
 
 static void
 load(void)
@@ -143,7 +144,7 @@ backdrop_update(struct cg_server *server)
 		if ((rect = wlr_scene_rect_create(server->backdrop_tree, box.width, box.height, g_color))) {
 			wlr_scene_node_set_position(&rect->node, box.x, box.y);
 		}
-		if (g_picture && g_picture->base.width <= box.width && g_picture->base.height <= box.height) {
+		if (g_picture && !g_shell_up && g_picture->base.width <= box.width && g_picture->base.height <= box.height) {
 			struct wlr_scene_buffer *pic = wlr_scene_buffer_create(server->backdrop_tree, &g_picture->base);
 			if (pic) {
 				wlr_scene_node_set_position(&pic->node, box.x + (box.width - g_picture->base.width) / 2,
@@ -151,6 +152,23 @@ backdrop_update(struct cg_server *server)
 			}
 		}
 	}
+}
+
+/* The words ("Welcome", "Getting things ready") are for while the session
+ * starts. Once the desktop is there they go, leaving the colour: on a
+ * screen the desktop did not reach, "Welcome" stayed for good (David
+ * 2026-11-12: "it seems to leave the loading screen on one and loads the
+ * desktop on the other"). */
+void
+backdrop_shell_up(struct cg_server *server)
+{
+#ifndef SG_MUTANT_BACKDROP_STAYS
+	if (g_shell_up) {
+		return;
+	}
+	g_shell_up = true;
+	backdrop_update(server);
+#endif
 }
 
 void

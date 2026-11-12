@@ -5,5 +5,6 @@ struct cg_server;
 
 void backdrop_init(struct cg_server *server);
 void backdrop_update(struct cg_server *server);
+void backdrop_shell_up(struct cg_server *server);
 
 #endif

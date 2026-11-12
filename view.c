@@ -23,6 +23,7 @@
 #include "seat.h"
 #include "server.h"
 #include "view.h"
+#include "backdrop.h"
 #include "wayland_app.h"
 #if CAGE_HAS_XWAYLAND
 #include "xwayland.h"
@@ -288,6 +289,13 @@ view_map(struct cg_view *view, struct wlr_surface *surface)
 		return;
 	}
 	view->scene_tree->node.data = view;
+
+#if CAGE_HAS_XWAYLAND
+	/* the desktop is up: the sign-in words go from the backdrop */
+	if (view->type == CAGE_XWAYLAND_VIEW && xwayland_view_is_shell_desktop(view)) {
+		backdrop_shell_up(server);
+	}
+#endif
 
 	bool unmanaged = false;
 #if CAGE_HAS_XWAYLAND
