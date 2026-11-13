@@ -26,7 +26,7 @@ unset DISPLAY WAYLAND_DISPLAY XAUTHORITY
 
 if [ "${1:-}" = --mutants ]; then
     rc=0
-    for m in STATIC_BACKGROUND NO_BATTERY_SAVER CELLS_EVERY_FRAME PICTURE_COLOURS LIGHT_WHITE ROUND_LIGHT CELLS_ALL_OVER; do
+    for m in STATIC_BACKGROUND NO_BATTERY_SAVER CELLS_EVERY_FRAME PICTURE_COLOURS LIGHT_WHITE ROUND_LIGHT CELLS_ALL_OVER NO_ICONS_PICT; do
         out=$(mktemp /var/tmp/sg-animbg-mutant.XXXXXX)
         cc -std=c11 -O2 -DSG_MUTANT_$m -o "$out" "$HERE/sg-deskcomp.c" -lX11 -lXcomposite -lXdamage -lXfixes -lXrender -lXext -lm \
             || { echo "SKIP: cannot build the mutant"; exit 77; }
@@ -80,7 +80,7 @@ cat > "$T/session.sh" <<EOF2
 cd "$WINEPREFIX/drive_c"
 D="$T/dump"
 glide() { x=\$1; while [ \$x -le \$2 ]; do xdotool mousemove \$x \$3; sleep 0.05; x=\$((x + 20)); done; }
-"$WINE" explorer /desktop=shell,1024x700 > "$T/explorer.out" 2>&1 &
+SG_DESKTOP_DUMP="Z:$T/desk.dump" "$WINE" explorer /desktop=shell,1024x700 > "$T/explorer.out" 2>&1 &
 sleep 8
 xdotool mousemove 500 620
 "$DESKCOMP" -dump "\$D" > "$T/deskcomp.log" 2>&1 & CP=\$!
@@ -112,6 +112,12 @@ sleep 2; cp "\$D" "$T/dump.c2"
 "$WINE" deskcomp-probe.exe glide Main 420 300 1000
 sleep 1; cp "\$D" "$T/dump.c3"; import -window root "$T/c3.png"
 kill \$CP; sleep 1
+# a selected icon on living glass: its see-through box over the glass
+"$DESKCOMP" -dump "\$D" > "$T/deskcomp6.log" 2>&1 & CP=\$!
+sleep 4; import -window root "$T/s0.png"
+xdotool mousemove 44 44 click 1; sleep 0.5; xdotool mousemove 600 650; sleep 2
+cp "\$D" "$T/dump.s1"; cp "$T/desk.dump" "$T/desk.s1"; import -window root "$T/s1.png"
+kill \$CP; sleep 2; import -window root "$T/s2.png"
 # the light by panes: a leaded picture, the light on a pane of its bottom row
 printf 'shadows=1\nshadow=modern\nanimations=1\nopen=none\nminimize=none\nwobbly=0\nmoving=0\nbackground=light\n' > "$XDG_CONFIG_HOME/stained-glass/effects.conf"
 "$WINE" deskcomp-probe.exe wallpaper 'C:\\leaded.bmp'; sleep 3
@@ -216,5 +222,19 @@ if [ -f "$T/p2.png" ]; then
     [ "$fr_" = same ] && [ "$nr_" = other ] && pass "living glass on a leaded picture: the picture itself away from the window ($far), cells beside it ($near)" \
         || fail "living glass on a leaded picture: away from the window $far, beside it $near (the picture: 48,112,192)"
 else fail "no picture of living glass on the leaded picture"; fi
+# a selected icon on living glass (David 2026-11-13: its see-through box
+# showed "the wrong background", the still picture): the box's margin left of
+# the icon shows the glass through it -- not the desktop's own picture there
+# (s2, the compositor gone) -- and differs from the glass unselected (s0);
+# the icon itself as drawn. explorer sends the icons alone (wine-sg 7763,
+# _SG_ICONS_PIXMAP); SG_MUTANT_NO_ICONS_PICT: the desktop's picture again
+mad() { convert "$T/$1.png" "$T/$2.png" -crop "$3" +repage -compose difference -composite -colorspace gray -format '%[fx:int(1000*mean)]' info: 2>/dev/null; }
+if [ -f "$T/s2.png" ] && grep -q 'sel=0,' "$T/desk.s1" 2>/dev/null; then
+    # (and the other icon, not drawn again since: the whole layer was sent)
+    glass=$(mad s1 s2 12x44+5+6); shown=$(mad s1 s0 12x44+5+6); icon=$(mad s1 s2 24x24+31+20); other=$(mad s1 s2 24x24+31+106)
+    grep -q 'iconlayer=1' "$T/dump.s1" && [ "${glass:-0}" -ge 12 ] && [ "${shown:-0}" -ge 15 ] && [ "${icon:-999}" -le 5 ] && [ "${other:-999}" -le 5 ] \
+        && pass "a selected icon on living glass: the glass through its box ($glass from the still picture, $shown from unselected), the icons as drawn ($icon, $other)" \
+        || fail "a selected icon's box: from the still picture ${glass:-?}, from unselected ${shown:-?}, the icons ${icon:-?} ${other:-?}; $(grep background= "$T/dump.s1")"
+else fail "no picture of a selected icon on living glass: $(head -1 "$T/desk.s1" 2>/dev/null)"; fi
 [ "$RC" -eq 0 ] && echo "RESULT: PASS" || echo "RESULT: FAIL"
 exit "$RC"

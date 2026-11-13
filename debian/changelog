@@ -1,3 +1,12 @@
+sg-compositor (0.2.0+sg62) unstable; urgency=medium
+
+  * sg-deskcomp: on an animated background (Living glass, the light) the
+    desktop's icons are laid over it as explorer draws them on their own
+    (wine-sg 7763, _SG_ICONS_PIXMAP): a selected icon's see-through box
+    showed the still wallpaper in it, not the glass.
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Fri, 13 Nov 2026 10:25:00 -0800
+
 sg-compositor (0.2.0+sg61) unstable; urgency=medium
 
   * A monitor starts at its own resolution and the fastest refresh rate it

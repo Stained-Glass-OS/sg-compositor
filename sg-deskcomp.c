@@ -114,7 +114,7 @@ static XserverRegion damage_all;
 static int damage_event, damage_error, xfixes_event, xfixes_error, shape_event, shape_error;
 static struct win *wins;
 static int nwins, capwins;
-static Atom atom_shadow, atom_opacity, atom_bgpixmap, atom_acrylic, atom_minrect, atom_frame, atom_wppixmap;
+static Atom atom_shadow, atom_opacity, atom_bgpixmap, atom_acrylic, atom_minrect, atom_frame, atom_wppixmap, atom_iconspixmap;
 static const char *dump_path;
 static volatile sig_atomic_t quit;
 static int trapped;
@@ -962,6 +962,12 @@ static int draw_window(struct win *w, double t)
  * at 30 a second at most; nothing while a full-screen program is on top (X
  * draws it) or on battery below 20 % ("battery saver"). */
 static Picture wp_pict, icon_mask, cells_pict;
+/* the icons alone, see-through about them (wine-sg 7763, _SG_ICONS_PIXMAP):
+ * laid over the moving background in place of the desktop's picture through
+ * icon_mask, which showed the still wallpaper in a selected icon's
+ * see-through box */
+static Picture icons_pict;
+static Damage icons_damage;
 static Pixmap cells_pixmap;
 static int cells_w, cells_h;
 static double anim_next;          /* when the next frame is due (0: none) */
@@ -1268,6 +1274,27 @@ static void load_wallpaper(void)
 	}
 	if (a) XDestroyImage(a);
 	if (b) XDestroyImage(b);
+}
+
+static void load_icons(void)
+{
+	Pixmap pm = prop_card(desktop, atom_iconspixmap, XA_PIXMAP, 0);
+	trapped = 0;
+	if (icons_damage) XDamageDestroy(dpy, icons_damage);
+	if (icons_pict) XRenderFreePicture(dpy, icons_pict);
+	XSync(dpy, False);
+	icons_pict = 0;
+	icons_damage = 0;
+#ifndef SG_MUTANT_NO_ICONS_PICT
+	if (!pm || opt_background == BG_STATIC) return;
+	trapped = 0;
+	icons_pict = XRenderCreatePicture(dpy, pm, XRenderFindStandardFormat(dpy, PictStandardARGB32), 0, NULL);
+	XSync(dpy, False);
+	if (trapped) { icons_pict = 0; return; }
+	icons_damage = XDamageCreate(dpy, pm, XDamageReportNonEmpty);
+	XSync(dpy, False);
+	if (trapped) icons_damage = 0;
+#endif
 }
 
 /* a part of the desktop's picture drawn again: where the icons are, in it
@@ -1854,7 +1881,9 @@ static void draw_background(void)
 	} else
 		XRenderComposite(dpy, PictOpSrc, base, None, buffer_pict, 0, 0, 0, 0, 0, 0, dw, dh);
 	/* the icons, crisp over it */
-	if (wp_pict && icon_mask)
+	if (wp_pict && icons_pict)
+		XRenderComposite(dpy, PictOpOver, icons_pict, None, buffer_pict, 0, 0, 0, 0, 0, 0, dw, dh);
+	else if (wp_pict && icon_mask)
 		XRenderComposite(dpy, PictOpOver, bg_pict, icon_mask, buffer_pict, 0, 0, 0, 0, 0, 0, dw, dh);
 }
 
@@ -1937,9 +1966,9 @@ static void dump(void)
 	fprintf(f, "wobble_ms_max=%.1f wobble_triangles=%lu\n", wobble_ms_max, wobble_triangles);
 	fprintf(f, "settings shadows=%d shadow=%s animations=%d open=%s minimize=%s wobbly=%d moving=%d glass=%d\n",
 	        opt_shadows, opt_shadow, opt_anim, opt_open, opt_minimize, opt_wobbly, opt_moving, opt_glass);
-	fprintf(f, "background=%s anim_frames=%lu battery=%d wallpaper=%d icons=%d light=%d,%d,%d sites=%d\n",
+	fprintf(f, "background=%s anim_frames=%lu battery=%d wallpaper=%d icons=%d iconlayer=%d light=%d,%d,%d sites=%d\n",
 	        opt_background == BG_LIGHT ? "light" : opt_background == BG_CELLS ? "cells" : "static", anim_frames, anim_battery,
-	        wp_pict != 0, icon_mask != 0, light_x, light_y, light_r, nsites);
+	        wp_pict != 0, icon_mask != 0, icons_pict != 0, light_x, light_y, light_r, nsites);
 	for (int i = 0; i < nwins; i++) {
 		float m = 0;
 		char target[32] = "-";
@@ -2050,6 +2079,7 @@ static int attach(Window d)
 	setup_canvas();
 	load_background();
 	load_wallpaper();
+	load_icons();
 	if (XQueryTree(dpy, desktop, &root, &parent, &children, &n)) {
 		for (unsigned int i = 0; i < n; i++) add_window(children[i]);
 		if (children) XFree(children);
@@ -2186,6 +2216,7 @@ int main(int argc, char **argv)
 	atom_minrect = XInternAtom(dpy, "_SG_MINRECT", False);
 	atom_frame = XInternAtom(dpy, "_SG_FRAME", False);
 	atom_wppixmap = XInternAtom(dpy, "_SG_WALLPAPER_PIXMAP", False);
+	atom_iconspixmap = XInternAtom(dpy, "_SG_ICONS_PIXMAP", False);
 	argb_format = XRenderFindStandardFormat(dpy, PictStandardARGB32);
 	a8_format = XRenderFindStandardFormat(dpy, PictStandardA8);
 	damage_all = XFixesCreateRegion(dpy, NULL, 0);
@@ -2216,7 +2247,9 @@ int main(int argc, char **argv)
 				XDamageNotifyEvent *de = (XDamageNotifyEvent *)&e;
 				XserverRegion parts = XFixesCreateRegion(dpy, NULL, 0);
 				XDamageSubtract(dpy, de->damage, None, parts);
-				if (bg_damage && de->damage == bg_damage) {
+				if (icons_damage && de->damage == icons_damage)
+					XFixesUnionRegion(dpy, damage_all, damage_all, parts);
+				else if (bg_damage && de->damage == bg_damage) {
 					/* the desktop's picture, in the desktop's coordinates */
 					XFixesUnionRegion(dpy, damage_all, damage_all, parts);
 					if (icon_mask) {
@@ -2286,9 +2319,11 @@ int main(int argc, char **argv)
 				else if ((w = find(e.xreparent.window))) { damage_win(w); forget(w); }
 				break;
 			case PropertyNotify:
-				if (e.xproperty.window == desktop && (e.xproperty.atom == atom_bgpixmap || e.xproperty.atom == atom_wppixmap)) {
+				if (e.xproperty.window == desktop && (e.xproperty.atom == atom_bgpixmap || e.xproperty.atom == atom_wppixmap ||
+				                                    e.xproperty.atom == atom_iconspixmap)) {
 					load_background();
 					load_wallpaper();
+					load_icons();
 					if (thumb) { XDestroyImage(thumb); thumb = NULL; }
 					damage_rect(0, 0, dw, dh);
 				} else if ((w = find(e.xproperty.window))) {
@@ -2307,6 +2342,7 @@ int main(int argc, char **argv)
 			read_settings();
 			if (was != opt_background) {   /* another background: the wallpaper and icons again */
 				load_wallpaper();
+				load_icons();
 				if (thumb) { XDestroyImage(thumb); thumb = NULL; }
 				anim_next = 0;
 				light_box.width = 0;
