@@ -307,6 +307,30 @@ handle_new_output(struct wl_listener *listener, void *data)
 		if (preferred_mode) {
 			wlr_output_state_set_mode(&state, preferred_mode);
 		}
+		/* sg-compositor: the monitor's own resolution at the fastest refresh
+		 * rate it offers there, as Windows 11 picks it -- a 144 Hz monitor
+		 * whose preferred mode is 60 Hz ran at 60 (David 2026-11-12: mixed
+		 * refresh rates). Each monitor has its own: one at 60 beside one at
+		 * 144 each draw at their own pace (frames are per output). Settings
+		 * keeps another (sg-settingsctl display restore). */
+		if (preferred_mode) {
+			struct wlr_output_mode *mode, *fastest = preferred_mode;
+			wl_list_for_each (mode, &wlr_output->modes, link) {
+				if (mode->width != preferred_mode->width || mode->height != preferred_mode->height ||
+					mode->refresh <= fastest->refresh) {
+					continue;
+				}
+				wlr_output_state_set_mode(&state, mode);
+				if (wlr_output_test_state(wlr_output, &state)) {
+					fastest = mode;
+				}
+			}
+			wlr_output_state_set_mode(&state, fastest);
+			if (fastest != preferred_mode) {
+				wlr_log(WLR_INFO, "Output %s: %dx%d at %d.%03d Hz, its fastest", wlr_output->name, fastest->width,
+					fastest->height, fastest->refresh / 1000, fastest->refresh % 1000);
+			}
+		}
 		if (!wlr_output_test_state(wlr_output, &state)) {
 			struct wlr_output_mode *mode;
 			wl_list_for_each (mode, &wlr_output->modes, link) {
