@@ -46,6 +46,18 @@ xwayland_view_is_shell_desktop(struct cg_view *view)
 	       !strcmp(xs->class, "explorer.exe") && xs->title && strstr(xs->title, " Desktop");
 }
 
+/* where and how big the X window itself is (what the program asked for) */
+bool
+xwayland_view_x_box(struct cg_view *view, struct wlr_box *box)
+{
+	struct wlr_xwayland_surface *xs = xwayland_view_from_view(view)->xwayland_surface;
+	if (!xs || xs->width <= 0 || xs->height <= 0) {
+		return false;
+	}
+	*box = (struct wlr_box){xs->x, xs->y, xs->width, xs->height};
+	return true;
+}
+
 static char *
 get_title(struct cg_view *view)
 {

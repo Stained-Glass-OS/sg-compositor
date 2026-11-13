@@ -171,6 +171,47 @@ view_position(struct cg_view *view)
 	if (view->type == CAGE_XWAYLAND_VIEW && view->user_placed) {
 		return;
 	}
+	/* with several displays (David 2026-11-13: the sign-in screen sat
+	 * across two, half on each): a window that asks for exactly one
+	 * display's area -- the sign-in screen, a full-screen program -- is put
+	 * on that display; another is centred on one display, the one the
+	 * pointer is on (else the one at the layout's origin, the main one
+	 * when none is set), not across the gap between them */
+#ifndef SG_MUTANT_SPAN_CENTRED
+	if (view->type == CAGE_XWAYLAND_VIEW && !view->server->remote) {
+		struct wlr_box want, box, one = {0};
+		struct cg_output *output;
+		struct wlr_output *at;
+		bool asked = xwayland_view_x_box(view, &want);
+		wl_list_for_each (output, &view->server->outputs, link) {
+			wlr_output_layout_get_box(view->server->output_layout, output->wlr_output, &box);
+			if (asked && !wlr_box_empty(&box) && box.x == want.x && box.y == want.y &&
+			    box.width == want.width && box.height == want.height) {
+				/* and the sign-in words go from the other displays:
+				 * "Welcome" stayed beside the sign-in screen */
+				backdrop_shell_up(view->server);
+				view->lx = box.x;
+				view->ly = box.y;
+				if (view->scene_tree) {
+					wlr_scene_node_set_position(&view->scene_tree->node, view->lx, view->ly);
+				}
+				return;
+			}
+		}
+		at = wlr_output_layout_output_at(view->server->output_layout, view->server->seat->cursor->x,
+						 view->server->seat->cursor->y);
+		if (!at) {
+			at = wlr_output_layout_output_at(view->server->output_layout, 0, 0);
+		}
+		if (at) {
+			wlr_output_layout_get_box(view->server->output_layout, at, &one);
+		}
+		if (!wlr_box_empty(&one) && !view_extends_output_layout(view, &one)) {
+			view_center(view, &one);
+			return;
+		}
+	}
+#endif
 	if (view->type == CAGE_XWAYLAND_VIEW && !view_extends_output_layout(view, &layout_box)) {
 		view_center(view, &layout_box);
 		return;

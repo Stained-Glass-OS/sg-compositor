@@ -1,3 +1,13 @@
+sg-compositor (0.2.0+sg63) unstable; urgency=medium
+
+  * Several displays: a window asking for exactly one display's area (the
+    sign-in screen, a full-screen program) is put on that display, and
+    other windows are centred on one display, not across the gap between
+    two -- the sign-in screen sat half on each. A window filling a display
+    also clears the "Welcome" words from the other displays.
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Fri, 13 Nov 2026 16:20:00 -0800
+
 sg-compositor (0.2.0+sg62) unstable; urgency=medium
 
   * sg-deskcomp: on an animated background (Living glass, the light) the

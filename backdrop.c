@@ -155,7 +155,8 @@ backdrop_update(struct cg_server *server)
 }
 
 /* The words ("Welcome", "Getting things ready") are for while the session
- * starts. Once the desktop is there they go, leaving the colour: on a
+ * starts. Once the desktop is there -- or a screen of the sign-in, a window
+ * filling one display (view.c) -- they go, leaving the colour: on a
  * screen the desktop did not reach, "Welcome" stayed for good (David
  * 2026-11-12: "it seems to leave the loading screen on one and loads the
  * desktop on the other"). */
