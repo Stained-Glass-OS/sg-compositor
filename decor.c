@@ -1055,7 +1055,7 @@ toggle_maximize(struct cg_decor *d)
 
 	if (!view->maximized) {
 		view->restore = (struct wlr_box) {view->lx, view->ly, xs->width, xs->height};
-		view_get_layout_box(view, &box);
+		view_get_output_box(view, &box);
 		view->maximized = true;
 		wlr_xwayland_surface_set_maximized(xs, true);
 		move_view(view, box.x + body_w(), box.y + decor_title_h(), box.width - 2 * body_w(), box.height - decor_title_h() - body_w() - decor_taskbar_h());

@@ -41,6 +41,7 @@ struct cg_view {
 	bool minimized;
 	bool maximized;
 	struct wlr_box restore; /* geometry before maximising */
+	struct wlr_box fs_restore; /* an X window's geometry before full screen */
 	/* sg-compositor: a Linux program's window with the compositor's title
 	 * bar above it (decor.c), and one the user has moved or maximized
 	 * there -- no longer centred for it. */
@@ -67,6 +68,7 @@ bool view_is_transient_for(struct cg_view *child, struct cg_view *parent);
 void view_activate(struct cg_view *view, bool activate);
 void view_position(struct cg_view *view);
 void view_get_layout_box(struct cg_view *view, struct wlr_box *box);
+void view_get_output_box(struct cg_view *view, struct wlr_box *box);
 void view_position_all(struct cg_server *server);
 void view_unmap(struct cg_view *view);
 void view_map(struct cg_view *view, struct wlr_surface *surface);

@@ -136,6 +136,46 @@ view_get_layout_box(struct cg_view *view, struct wlr_box *box)
 	view_layout_box(view, box);
 }
 
+/* The display a window is on -- the one under its middle, else under the
+ * pointer, else the one at the layout's origin -- for what fills "the
+ * screen": maximized, full screen, the work area above the taskbar. With
+ * several displays these filled all of them (David 2026-11-13: Firefox and
+ * the Remote Desktop client full screen across every display). While
+ * Remote Desktop has the session, its own box. */
+void
+view_get_output_box(struct cg_view *view, struct wlr_box *box)
+{
+	struct wlr_box layout;
+
+	view_layout_box(view, &layout);
+#ifndef SG_MUTANT_FILL_ALL_DISPLAYS
+	struct cg_server *server = view->server;
+	if (!(server->remote && server->remote_output)) {
+		struct wlr_output *at = NULL;
+		int w = 0, h = 0;
+		if (view->impl->get_geometry) {
+			view->impl->get_geometry(view, &w, &h);
+		}
+		if (w > 0 && h > 0) {
+			at = wlr_output_layout_output_at(server->output_layout, view->lx + w / 2, view->ly + h / 2);
+		}
+		if (!at) {
+			at = wlr_output_layout_output_at(server->output_layout, server->seat->cursor->x, server->seat->cursor->y);
+		}
+		if (!at) {
+			at = wlr_output_layout_output_at(server->output_layout, layout.x, layout.y);
+		}
+		if (at) {
+			wlr_output_layout_get_box(server->output_layout, at, box);
+			if (!wlr_box_empty(box)) {
+				return;
+			}
+		}
+	}
+#endif
+	*box = layout;
+}
+
 void
 view_position(struct cg_view *view)
 {
@@ -210,6 +250,11 @@ view_position(struct cg_view *view)
 			view_center(view, &one);
 			return;
 		}
+		/* bigger than one display: maximized on it (below), not centred
+		 * across several */
+		if (!wlr_box_empty(&one)) {
+			goto too_big;
+		}
 	}
 #endif
 	if (view->type == CAGE_XWAYLAND_VIEW && !view_extends_output_layout(view, &layout_box)) {
@@ -220,8 +265,12 @@ view_position(struct cg_view *view)
 	 * screen: SG Office's editors) is maximized as the title bar's
 	 * Maximize does -- above the taskbar, below its own title bar -- not
 	 * over the taskbar; restored, it takes two thirds, centred */
+#ifndef SG_MUTANT_SPAN_CENTRED
+too_big:
+#endif
 	if (view->type == CAGE_XWAYLAND_VIEW) {
-		struct wlr_box box = layout_box;
+		struct wlr_box box;
+		view_get_output_box(view, &box);
 		box.height -= DECOR_TASKBAR_H;
 		if (view->decorated) {
 			box.y += decor_title_h();

@@ -829,7 +829,7 @@ handle_request_maximize(struct wl_listener *listener, void *data)
 	if (want == view->maximized) {
 		return;
 	}
-	view_get_layout_box(view, &box);
+	view_get_output_box(view, &box);
 	if (want) {
 		view->restore = (struct wlr_box){view->lx, view->ly, xs->width, xs->height};
 		view->maximized = true;
@@ -895,7 +895,7 @@ handle_session_request_maximize(struct wl_listener *listener, void *data)
 	if (want == view->maximized || !view->wlr_surface) {
 		return;
 	}
-	view_get_layout_box(view, &box);
+	view_get_output_box(view, &box);
 	box.height -= DECOR_TASKBAR_H;
 	if (decor_has(view)) {
 		box.y += decor_title_h();

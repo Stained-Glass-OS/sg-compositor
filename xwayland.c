@@ -150,8 +150,34 @@ handle_xwayland_surface_request_fullscreen(struct wl_listener *listener, void *d
 {
 	struct cg_xwayland_view *xwayland_view = wl_container_of(listener, xwayland_view, request_fullscreen);
 	struct wlr_xwayland_surface *xwayland_surface = xwayland_view->xwayland_surface;
-	wlr_xwayland_surface_set_fullscreen(xwayland_view->xwayland_surface, xwayland_surface->fullscreen);
-	decor_set_fullscreen(&xwayland_view->view, xwayland_surface->fullscreen);
+	struct cg_view *view = &xwayland_view->view;
+	bool on = xwayland_surface->fullscreen;
+	wlr_xwayland_surface_set_fullscreen(xwayland_view->xwayland_surface, on);
+	decor_set_fullscreen(view, on);
+	/* sg-compositor: full screen is the display it is on, put there by us
+	 * as a window manager does -- left to itself a program took the whole
+	 * X screen, every display (Firefox, the Remote Desktop client) -- and
+	 * back where it was after */
+	if (on && view->wlr_surface) {
+		struct wlr_box box;
+		view->fs_restore = (struct wlr_box){view->lx, view->ly, xwayland_surface->width, xwayland_surface->height};
+		view_get_output_box(view, &box);
+		view->lx = box.x;
+		view->ly = box.y;
+		if (view->scene_tree) {
+			wlr_scene_node_set_position(&view->scene_tree->node, box.x, box.y);
+		}
+		wlr_xwayland_surface_configure(xwayland_surface, box.x, box.y, box.width, box.height);
+	} else if (!on && !wlr_box_empty(&view->fs_restore)) {
+		struct wlr_box r = view->fs_restore;
+		view->fs_restore = (struct wlr_box){0};
+		view->lx = r.x;
+		view->ly = r.y;
+		if (view->scene_tree) {
+			wlr_scene_node_set_position(&view->scene_tree->node, r.x, r.y);
+		}
+		wlr_xwayland_surface_configure(xwayland_surface, r.x, r.y, r.width, r.height);
+	}
 }
 
 /* sg-compositor: an override-redirect window moves itself; follow it. */

@@ -79,7 +79,7 @@ wayland_app_is(struct cg_view *view)
 static void
 work_area(struct cg_view *view, struct wlr_box *box)
 {
-	view_get_layout_box(view, box);
+	view_get_output_box(view, box);
 	box->height -= DECOR_TASKBAR_H;
 	if (box->height < MIN_H) {
 		box->height = MIN_H;
@@ -192,7 +192,7 @@ set_fullscreen(struct cg_view *view, bool on)
 			xv->windowed = (struct wlr_box){view->lx + geom.x, view->ly + geom.y, geom.width, geom.height};
 		}
 		xv->fullscreen = true;
-		view_get_layout_box(view, &layout);
+		view_get_output_box(view, &layout);
 		wlr_xdg_toplevel_set_size(tl, layout.width, layout.height);
 		wlr_xdg_toplevel_set_fullscreen(tl, true);
 		place(view, layout.x, layout.y);
@@ -488,7 +488,7 @@ wayland_app_initial_configure(struct cg_view *view)
 		wlr_xdg_toplevel_set_bounds(tl, work.width, work.height);
 	}
 	if (tl->requested.fullscreen || xv->want_fullscreen) {
-		view_get_layout_box(view, &layout);
+		view_get_output_box(view, &layout);
 		wlr_xdg_toplevel_set_size(tl, layout.width, layout.height);
 		wlr_xdg_toplevel_set_fullscreen(tl, true);
 		xv->want_fullscreen = true;
@@ -514,7 +514,7 @@ wayland_app_place(struct cg_view *view)
 		xv->fullscreen = true;
 	}
 	if (xv->fullscreen) {
-		view_get_layout_box(view, &layout);
+		view_get_output_box(view, &layout);
 		wlr_xdg_toplevel_set_size(xv->xdg_toplevel, layout.width, layout.height);
 		place(view, layout.x, layout.y);
 		return;
