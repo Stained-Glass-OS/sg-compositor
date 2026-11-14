@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <wayland-server-core.h>
@@ -381,6 +382,104 @@ handle_pointer_destroy(struct wl_listener *listener, void *data)
 	update_capabilities(seat);
 }
 
+/* ---- scrolling direction (Settings > Mouse / Touchpad) ----------------------
+ * $XDG_CONFIG_HOME/stained-glass/input.conf, written by sg-settingsctl:
+ *   natural_mouse=0|1      a mouse's wheel: content moves with the finger
+ *   natural_touchpad=0|1   two fingers on a touchpad, likewise
+ * Both off unless chosen (David 2026-11-13: "natural scrolling should not be
+ * default"), whatever a device's own default. Applied to each mouse and
+ * touchpad as it comes, and to all of them again within a second of the
+ * file changing. */
+static struct {
+	bool natural_mouse, natural_touchpad;
+	struct timespec seen;
+	bool had;
+} input_conf;
+
+static bool
+read_input_conf(void)
+{
+	char path[512], line[128];
+	const char *cfg = getenv("XDG_CONFIG_HOME"), *home = getenv("HOME");
+	struct stat st;
+	FILE *f;
+
+	if (cfg && *cfg) {
+		snprintf(path, sizeof(path), "%s/stained-glass/input.conf", cfg);
+	} else if (home) {
+		snprintf(path, sizeof(path), "%s/.config/stained-glass/input.conf", home);
+	} else {
+		return false;
+	}
+	if (stat(path, &st) != 0) {
+		bool changed = input_conf.had;
+		input_conf.had = false;
+		input_conf.natural_mouse = input_conf.natural_touchpad = false;
+		return changed;
+	}
+	if (input_conf.had && st.st_mtim.tv_sec == input_conf.seen.tv_sec && st.st_mtim.tv_nsec == input_conf.seen.tv_nsec) {
+		return false;
+	}
+	input_conf.seen = st.st_mtim;
+	input_conf.had = true;
+	input_conf.natural_mouse = input_conf.natural_touchpad = false;
+	if ((f = fopen(path, "r"))) {
+		while (fgets(line, sizeof(line), f)) {
+			if (!strncmp(line, "natural_mouse=", 14)) {
+				input_conf.natural_mouse = atoi(line + 14) == 1;
+			} else if (!strncmp(line, "natural_touchpad=", 17)) {
+				input_conf.natural_touchpad = atoi(line + 17) == 1;
+			}
+		}
+		fclose(f);
+	}
+	/* (in the journal whatever the log level: what a mouse or touchpad was
+	 * set to, when one scrolls the wrong way) */
+	fprintf(stderr, "sg-compositor: input.conf: natural scrolling mouse=%d touchpad=%d\n", input_conf.natural_mouse,
+		input_conf.natural_touchpad);
+	return true;
+}
+
+static void
+apply_input_conf(struct wlr_input_device *device)
+{
+	struct libinput_device *li;
+	bool touchpad, natural;
+
+	if (!wlr_input_device_is_libinput(device) || !(li = wlr_libinput_get_device_handle(device))) {
+		return;
+	}
+	if (!libinput_device_config_scroll_has_natural_scroll(li)) {
+		return;
+	}
+	touchpad = libinput_device_config_tap_get_finger_count(li) > 0;
+	natural = touchpad ? input_conf.natural_touchpad : input_conf.natural_mouse;
+#ifdef SG_MUTANT_DEVICE_DEFAULT_SCROLL
+	natural = libinput_device_config_scroll_get_default_natural_scroll_enabled(li);
+#endif
+	libinput_device_config_scroll_set_natural_scroll_enabled(li, natural);
+	fprintf(stderr, "sg-compositor: input: %s (%s) natural scrolling %s\n", libinput_device_get_name(li),
+		touchpad ? "touchpad" : "mouse", natural ? "on" : "off");
+}
+
+static int
+input_conf_tick(void *data)
+{
+	struct cg_seat *seat = data;
+	struct cg_pointer *pointer;
+
+#ifdef SG_MUTANT_INPUTCONF_ONCE
+	return 0;
+#endif
+	if (read_input_conf()) {
+		wl_list_for_each (pointer, &seat->pointers, link) {
+			apply_input_conf(&pointer->pointer->base);
+		}
+	}
+	wl_event_source_timer_update(seat->input_conf_timer, 1000);
+	return 0;
+}
+
 static void
 handle_new_pointer(struct cg_seat *seat, struct wlr_pointer *wlr_pointer)
 {
@@ -399,6 +498,8 @@ handle_new_pointer(struct cg_seat *seat, struct wlr_pointer *wlr_pointer)
 	wl_signal_add(&wlr_pointer->base.events.destroy, &pointer->destroy);
 
 	map_input_device_to_output(seat, &wlr_pointer->base, wlr_pointer->output_name);
+	read_input_conf();
+	apply_input_conf(&wlr_pointer->base);
 }
 
 /* While Remote Desktop has the session, the console's own devices are
@@ -2072,6 +2173,12 @@ seat_create(struct cg_server *server, struct wlr_backend *backend)
 
 	seat->new_input.notify = handle_new_input;
 	wl_signal_add(&backend->events.new_input, &seat->new_input);
+
+	read_input_conf();
+	seat->input_conf_timer = wl_event_loop_add_timer(wl_display_get_event_loop(server->wl_display), input_conf_tick, seat);
+	if (seat->input_conf_timer) {
+		wl_event_source_timer_update(seat->input_conf_timer, 1000);
+	}
 
 	server->new_virtual_keyboard.notify = handle_virtual_keyboard;
 	server->new_virtual_pointer.notify = handle_virtual_pointer;

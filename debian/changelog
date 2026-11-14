@@ -1,3 +1,13 @@
+sg-compositor (0.2.0+sg65) unstable; urgency=medium
+
+  * The scrolling direction: natural scrolling is off for mice and
+    touchpads unless chosen in Settings > Mouse (input.conf, written by
+    sg-settingsctl input), applied to each device as it comes and again
+    within a second of the choice changing. What each device was set to
+    is in the journal.
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Fri, 13 Nov 2026 21:00:00 -0800
+
 sg-compositor (0.2.0+sg64) unstable; urgency=medium
 
   * Several displays: a Linux program's window maximized or full screen

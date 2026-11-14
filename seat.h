@@ -16,6 +16,7 @@
 #define XCURSOR_SIZE 24
 
 struct cg_seat {
+	struct wl_event_source *input_conf_timer; /* input.conf re-read (scrolling direction) */
 	/* sg-compositor: a key left out of the keys held when focus moves (the
 	 * shell's key that moved it: its press must reach the new window) */
 	uint32_t enter_skip_keycode;
