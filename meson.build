@@ -47,6 +47,7 @@ wayland_server = dependency('wayland-server')
 freetype       = dependency('freetype2')
 xcb            = dependency('xcb')
 xkbcommon      = dependency('xkbcommon')
+libdrm         = dependency('libdrm')
 # sg-compositor: a pen's bus (built in or a USB tablet), seat.c
 libinput       = dependency('libinput')
 math           = cc.find_library('m')
@@ -147,6 +148,7 @@ cage_sources = [
   'seat.c',
   'view.c',
   'xdg_shell.c',
+  'syncobj.c',
 ]
 
 cage_headers = [
@@ -163,6 +165,7 @@ cage_headers = [
   'view.h',
   'xdg_shell.h',
   'wayland_app.h',
+  'syncobj.h',
 ]
 
 if conf_data.get('CAGE_HAS_XWAYLAND', 0) == 1
@@ -178,6 +181,7 @@ executable(
     wayland_server,
     wlroots,
     xkbcommon,
+    libdrm,
     libinput,
     freetype,
     xcb,

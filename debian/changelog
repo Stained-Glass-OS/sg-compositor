@@ -1,3 +1,18 @@
+sg-compositor (0.2.0+sg66) unstable; urgency=medium
+
+  * Explicit synchronization (linux-drm-syncobj-v1) with NVIDIA's driver
+    (syncobj.c): wlroots 0.18 offers the protocol and waits for a buffer's
+    acquire fence to exist; the compositor now also waits (up to 100 ms)
+    for it to be signalled before the scene takes the buffer, and signals
+    the buffer's release point at the next output frame after it is let go
+    (50 ms without one). NVIDIA does no implicit synchronization: Xwayland's
+    buffers were shown half drawn and reused while shown -- Steam's pages
+    scrambled, games flickered (RTX 3090). Needs NVIDIA 555 or later
+    (sg-drivers offers NVIDIA's own); other drivers keep implicit sync
+    unless SG_EXPLICIT_SYNC=1; SG_EXPLICIT_SYNC=0 turns it off.
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Sun, 15 Nov 2026 12:00:00 -0800
+
 sg-compositor (0.2.0+sg65) unstable; urgency=medium
 
   * The scrolling direction: natural scrolling is off for mice and

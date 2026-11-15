@@ -63,6 +63,7 @@
 #include "public_capture.h"
 #include "seat.h"
 #include "server.h"
+#include "syncobj.h"
 #include "view.h"
 #include "xdg_shell.h"
 #if CAGE_HAS_XWAYLAND
@@ -481,6 +482,8 @@ main(int argc, char *argv[])
 		goto end;
 	}
 	server.compositor = compositor;
+	/* sg-compositor: explicit sync for NVIDIA's driver (syncobj.c) */
+	cg_syncobj_init(server.wl_display, server.renderer, compositor);
 
 	if (!wlr_subcompositor_create(server.wl_display)) {
 		wlr_log(WLR_ERROR, "Unable to create the wlroots subcompositor");

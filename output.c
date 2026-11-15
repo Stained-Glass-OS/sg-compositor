@@ -37,6 +37,7 @@
 
 #include "backdrop.h"
 #include "output.h"
+#include "syncobj.h"
 #include "seat.h"
 #include "server.h"
 #include "view.h"
@@ -170,6 +171,8 @@ handle_output_frame(struct wl_listener *listener, void *data)
 	}
 
 	wlr_scene_output_commit(output->scene_output, NULL);
+	/* the previous frame is presented: buffers let go before it are free */
+	cg_syncobj_frame();
 
 	struct timespec now = {0};
 	clock_gettime(CLOCK_MONOTONIC, &now);
