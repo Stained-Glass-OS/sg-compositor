@@ -37,6 +37,48 @@
 #include "xwayland.h"
 
 #if CAGE_HAS_XWAYLAND
+/* A menu, a combo box's list, a tooltip...: part of its program's window, not a
+ * window of its own. wlroots 0.18 keeps _NET_WM_WINDOW_TYPE as atoms only. */
+static bool
+popup_type(struct cg_server *server, struct wlr_xwayland_surface *xs)
+{
+	static const char *const names[] = {
+		"_NET_WM_WINDOW_TYPE_MENU", "_NET_WM_WINDOW_TYPE_DROPDOWN_MENU",
+		"_NET_WM_WINDOW_TYPE_POPUP_MENU", "_NET_WM_WINDOW_TYPE_TOOLTIP",
+		"_NET_WM_WINDOW_TYPE_COMBO", "_NET_WM_WINDOW_TYPE_DND",
+		"_NET_WM_WINDOW_TYPE_NOTIFICATION",
+	};
+	static xcb_atom_t atoms[sizeof(names) / sizeof(names[0])];
+	static xcb_connection_t *atoms_for;
+	xcb_connection_t *c;
+	size_t i, j;
+
+	if (!xs->window_type_len || !server->xwayland ||
+	    !(c = wlr_xwayland_get_xwm_connection(server->xwayland))) {
+		return false;
+	}
+	if (atoms_for != c) {   /* a new Xwayland: atoms again */
+		xcb_intern_atom_cookie_t ck[sizeof(names) / sizeof(names[0])];
+		for (i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+			ck[i] = xcb_intern_atom(c, 0, strlen(names[i]), names[i]);
+		}
+		for (i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+			xcb_intern_atom_reply_t *r = xcb_intern_atom_reply(c, ck[i], NULL);
+			atoms[i] = r ? r->atom : XCB_ATOM_NONE;
+			free(r);
+		}
+		atoms_for = c;
+	}
+	for (i = 0; i < xs->window_type_len; i++) {
+		for (j = 0; j < sizeof(atoms) / sizeof(atoms[0]); j++) {
+			if (atoms[j] != XCB_ATOM_NONE && xs->window_type[i] == atoms[j]) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 static struct wlr_xwayland_surface *
 program_surface(struct cg_view *view)
 {
@@ -62,6 +104,21 @@ program_surface(struct cg_view *view)
 #endif
 		return NULL;
 	}
+	/* a program's menu, or an undecorated window transient for another (its
+	 * popup): never a window with a button of its own, framed by the taskbar
+	 * or held hidden while it frames -- even when the program's own window is
+	 * framed, so not a mapped top-level (wine-sg 0762). Steam's menus showed
+	 * for one frame and vanished (David 2026-11-15). The same rule as
+	 * winex11's is_popup() (sg_embed.c). */
+#ifdef SG_MUTANT_MENU_LISTED
+	(void) popup_type;
+#else
+	if (popup_type(view->server, xs) ||
+	    (xs->parent && (xs->decorations & (WLR_XWAYLAND_SURFACE_DECORATIONS_NO_BORDER |
+	                                       WLR_XWAYLAND_SURFACE_DECORATIONS_NO_TITLE)))) {
+		return NULL;
+	}
+#endif
 	if (lock_view_is_privileged(&view->server->lock, view)) {
 		return NULL;
 	}

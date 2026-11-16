@@ -1,3 +1,17 @@
+sg-compositor (0.2.0+sg67) unstable; urgency=medium
+
+  * A Linux program's menus stay open while its window is framed by the
+    taskbar: a window of type menu, dropdown, popup menu, tooltip, combo,
+    DnD or notification, or an undecorated window transient for another,
+    is never listed for the taskbar nor held hidden while it frames
+    (session_x11.c). A framed program's window is no mapped top-level, so
+    its menus were taken for windows of their own and hidden for 2.5 s:
+    Steam's View/Friends/Games/Help menus showed for one frame (David
+    2026-11-15). Pairs with wine-sg 7800. xwindows-gate checks it (mutant
+    SG_MUTANT_MENU_LISTED).
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Sun, 15 Nov 2026 15:30:00 -0800
+
 sg-compositor (0.2.0+sg66) unstable; urgency=medium
 
   * Explicit synchronization (linux-drm-syncobj-v1) with NVIDIA's driver

@@ -7,7 +7,9 @@
 # did not close) kills a hung one's process (David 2026-10-02: CPU-X hung and
 # could not be ended); mutant SG_MUTANT_XKILL_DEAF fails it. A dialog whose
 # program's window is not shown (Timeshift's Setup Wizard) is listed; one over
-# a shown window is not (mutant SG_MUTANT_TRANSIENT_ANY lists neither).
+# a shown window is not (mutant SG_MUTANT_TRANSIENT_ANY lists neither). A menu
+# (POPUP_MENU) or an undecorated transient popup of a program whose window is
+# framed is never listed (Steam's menus; mutant SG_MUTANT_MENU_LISTED).
 set -u
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 COMP="${SG_COMPOSITOR_BIN:-$HERE/build/sg-compositor}"
@@ -49,6 +51,8 @@ grep -q "	Lone Dialog$" "$T/list" && pass "a dialog whose program's window is no
     || fail "the lone dialog is not listed"
 grep -q "	Main Window$" "$T/list" && ! grep -q "	Owned Dialog$" "$T/list" \
     && pass "a dialog over its program's shown window is not (the window has the button)" || fail "owned dialog: $(grep -E 'Main Window|Owned Dialog' "$T/list")"
+grep -qE "	Lone (Menu|Popup)$" "$T/list" && fail "a framed program's menu or popup is listed: $(grep -E 'Lone (Menu|Popup)' "$T/list")" \
+    || pass "a framed program's menu and undecorated popup are not listed (nor held)"
 shot shown
 set -- $(convert "$T/shown.png" -format "%w %h" info:); CX=$(($1 / 2)); CY=$(($2 / 2))
 [ "$(px shown $CX $CY)" = "255,0,0" ] && pass "the terminal is on the screen" || fail "shown: $(px shown $CX $CY)"
