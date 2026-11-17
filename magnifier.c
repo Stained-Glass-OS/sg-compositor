@@ -62,32 +62,110 @@
 #include <wlr/types/wlr_scene.h>
 #include <wlr/util/log.h>
 #include <drm_fourcc.h>
+#include <pixman.h>
 
 #include "output.h"
 #include "seat.h"
 #include "server.h"
 #include "view.h"
 #if CAGE_HAS_XWAYLAND
+#include "decor.h"
 #include "xwayland.h"
 #endif
+
+/* the Wine desktop's view (the shell's), or NULL */
+static struct cg_view *
+shell_desktop(struct cg_server *server)
+{
+#if CAGE_HAS_XWAYLAND
+	struct cg_view *view;
+	wl_list_for_each (view, &server->views, link) {
+		if (view->type == CAGE_XWAYLAND_VIEW && xwayland_view_is_shell_desktop(view)) {
+			return view;
+		}
+	}
+#endif
+	return NULL;
+}
 
 /* where the controller's coordinates start in the layout: the Wine desktop's top left */
 static void
 given_origin(struct cg_server *server, double *x, double *y)
 {
+	struct cg_view *desktop = shell_desktop(server);
 	*x = *y = 0;
-#if CAGE_HAS_XWAYLAND
-	struct cg_view *view;
-	wl_list_for_each (view, &server->views, link) {
-		if (view->type == CAGE_XWAYLAND_VIEW && xwayland_view_is_shell_desktop(view)) {
-#ifndef SG_MUTANT_MAGNIFY_LAYOUT_COORDS
-			*x = view->lx;
-			*y = view->ly;
+#ifdef SG_MUTANT_MAGNIFY_LAYOUT_COORDS
+	desktop = NULL;
 #endif
-			return;
+	if (desktop) {
+		*x = desktop->lx;
+		*y = desktop->ly;
+	}
+}
+
+/* whether scene node A is drawn above B */
+static bool
+node_above(struct wlr_scene_node *a, struct wlr_scene_node *b)
+{
+	struct wlr_scene_node *pa[64], *pb[64];
+	int na = 0, nb = 0;
+	for (struct wlr_scene_node *n = a; n && na < 64; n = n->parent ? &n->parent->node : NULL) {
+		pa[na++] = n;
+	}
+	for (struct wlr_scene_node *n = b; n && nb < 64; n = n->parent ? &n->parent->node : NULL) {
+		pb[nb++] = n;
+	}
+	int i = na - 1, j = nb - 1;
+	if (i < 0 || j < 0 || pa[i] != pb[j]) {
+		return false;
+	}
+	while (i > 0 && j > 0 && pa[i - 1] == pb[j - 1]) {
+		i--;
+		j--;
+	}
+	if (i == 0 || j == 0) {
+		return false; /* one holds the other */
+	}
+	/* siblings: the later one in their parent's list is drawn above */
+	struct wlr_scene_tree *parent = pa[i - 1]->parent;
+	for (struct wl_list *l = pa[i - 1]->link.next; l != &parent->children; l = l->next) {
+		if (l == &pb[j - 1]->link) {
+			return false;
 		}
 	}
+	return true;
+}
+
+/* what covers the Wine desktop: the windows drawn above it (Linux programs' X and Wayland windows,
+ * elevated programs'), in the controller's coordinates -- a magnifier control under them is not seen
+ * there. Wine's own windows are inside the desktop and the controller has left them out already. */
+static void
+covering(struct cg_server *server, double ox, double oy, pixman_region32_t *out)
+{
+	struct cg_view *desktop = shell_desktop(server), *view;
+	pixman_region32_init(out);
+	if (!desktop || !desktop->scene_tree) {
+		return;
+	}
+	wl_list_for_each (view, &server->views, link) {
+		int w = 0, h = 0, top = 0;
+		if (view == desktop || !view->scene_tree || !view->scene_tree->node.enabled || view->minimized) {
+			continue;
+		}
+		if (!node_above(&view->scene_tree->node, &desktop->scene_tree->node)) {
+			continue;
+		}
+#ifdef SG_MUTANT_MAGNIFY_UNDER_LINUX_WINDOWS
+		continue;
 #endif
+		view->impl->get_geometry(view, &w, &h);
+#if CAGE_HAS_XWAYLAND
+		if (decor_has(view)) {
+			top = decor_title_h(); /* its title bar, the compositor's, above it */
+		}
+#endif
+		pixman_region32_union_rect(out, out, (int) lround(view->lx - ox), (int) lround(view->ly - top - oy), w, h + top);
+	}
 }
 
 static void
@@ -762,15 +840,28 @@ magnifier_render_output(struct cg_output *output)
 	/* magnifier controls (MagSetWindowSource): over everything else, each
 	 * through the parts of its client area nothing covers */
 	struct cg_mag_window *mw;
+	pixman_region32_t covered;
+	covering(server, dx, dy, &covered);
 	wl_list_for_each (mw, &m->windows, link) {
 		double ddx = (mw->dst.x - gx) * scale, ddy = (mw->dst.y - gy) * scale;
 		double ddw = mw->dst.width * scale, ddh = mw->dst.height * scale;
 		double fx = mw->sw / ddw, fy = mw->sh / ddh; /* source pixels per output pixel */
+		/* its uncovered parts: the controller's clip (Wine's windows) less what is above the desktop */
+		pixman_region32_t seen;
+		pixman_region32_init(&seen);
 		for (int i = 0; i < mw->n_clip; i++) {
 			const struct wlr_box *c = &mw->clip[i];
 #ifdef SG_MUTANT_MAGNIFY_NO_CLIP
 			c = &mw->dst;
 #endif
+			pixman_region32_union_rect(&seen, &seen, c->x, c->y, c->width, c->height);
+		}
+		pixman_region32_subtract(&seen, &seen, &covered);
+		int n_rects = 0;
+		const pixman_box32_t *rects = pixman_region32_rectangles(&seen, &n_rects);
+		for (int i = 0; i < n_rects; i++) {
+			const struct wlr_box cbox = {rects[i].x1, rects[i].y1, rects[i].x2 - rects[i].x1, rects[i].y2 - rects[i].y1};
+			const struct wlr_box *c = &cbox;
 			struct wlr_box piece = {(int) lround((c->x - gx) * scale), (int) lround((c->y - gy) * scale),
 						(int) lround(c->width * scale), (int) lround(c->height * scale)};
 			if (!wlr_box_intersection(&piece, &piece, &whole)) {
@@ -802,7 +893,9 @@ magnifier_render_output(struct cg_output *output)
 				inverted[n_inverted++] = piece;
 			}
 		}
+		pixman_region32_fini(&seen);
 	}
+	pixman_region32_fini(&covered);
 
 	bool ok = wlr_render_pass_submit(pass);
 #ifdef SG_MUTANT_MAGNIFY_NO_INVERT

@@ -53,6 +53,7 @@ libinput       = dependency('libinput')
 # sg-compositor: Magnifier's inverted colours on GL (magnifier.c)
 egl            = dependency('egl')
 glesv2         = dependency('glesv2')
+pixman         = dependency('pixman-1')
 math           = cc.find_library('m')
 
 wl_protocol_dir = wayland_protos.get_variable('pkgdatadir')
@@ -192,6 +193,7 @@ executable(
     xcb,
     egl,
     glesv2,
+    pixman,
     math,
   ],
   install: true,

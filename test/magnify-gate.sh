@@ -28,7 +28,8 @@
 # Mutants (--mutants): SG_MUTANT_MAGNIFY_WHEN_SECURE, SG_MUTANT_MAGNIFY_NO_FOLLOW
 # (the origin left at 0,0), SG_MUTANT_MAGNIFY_NO_INVERT,
 # SG_MUTANT_MAGNIFY_LAYOUT_COORDS (coordinates taken as the layout's),
-# SG_MUTANT_MAGNIFY_NO_CLIP (a control drawn over what covers it).
+# SG_MUTANT_MAGNIFY_NO_CLIP (a control drawn over what covers it),
+# SG_MUTANT_MAGNIFY_UNDER_LINUX_WINDOWS (drawn over Linux programs' windows).
 #   WINE=/path/to/wine sh test/magnify-gate.sh [--mutants]   (no WINE: no Windows window)
 #   MAG_RENDERER=gles2 WLR_RENDER_DRM_DEVICE=/dev/dri/renderD128: on the GPU (inverting with GL)
 set -u
@@ -40,7 +41,7 @@ unset DISPLAY WAYLAND_DISPLAY XAUTHORITY
 
 if [ "${1:-}" = --mutants ]; then
     rc=0
-    for m in MAGNIFY_WHEN_SECURE MAGNIFY_NO_FOLLOW MAGNIFY_NO_INVERT MAGNIFY_LAYOUT_COORDS MAGNIFY_NO_CLIP; do
+    for m in ${MAG_MUTANTS:-MAGNIFY_WHEN_SECURE MAGNIFY_NO_FOLLOW MAGNIFY_NO_INVERT MAGNIFY_LAYOUT_COORDS MAGNIFY_NO_CLIP MAGNIFY_UNDER_LINUX_WINDOWS}; do
         b=$(mktemp -d /var/tmp/sg-magnify-mutant.XXXXXX)
         if ! { meson setup "$b" "$HERE" -Dc_args=-DSG_MUTANT_$m >/dev/null 2>&1 && ninja -C "$b" sg-compositor >/dev/null 2>&1; }; then
             echo "SKIP: cannot build the mutant"; rm -rf "$b"; exit 77
@@ -210,29 +211,35 @@ for line in sys.stdin:
 exec 4>"$T/win.in"
 win() { echo "$*" >&4; sleep 0.6; }
 ptr 5 5; shot wbase; mag smooth 0
-# the source 300,200 150x100 shown in 600,400 300x200 (200%), all of it visible
-win window 7 300 200 150 100 600 400 300 200 0 600 400 300 200; shot wview
-zoomed wbase 150 100 300 200 wexp; crop wview 300 200 600 400 wgot; d=$(ae "$T/wgot.png" "$T/wexp.png")
-crop wview 500 350 0 0 wout; crop wbase 500 350 0 0 woutexp; o=$(ae "$T/wout.png" "$T/woutexp.png")
+# the source 300,200 150x100 shown in 40,500 300x200 (200%; no window over it there), all of it visible
+win window 7 300 200 150 100 40 500 300 200 0 40 500 300 200; shot wview
+zoomed wbase 150 100 300 200 wexp; crop wview 300 200 40 500 wgot; d=$(ae "$T/wgot.png" "$T/wexp.png")
+crop wview 500 350 400 0 wout; crop wbase 500 350 400 0 woutexp; o=$(ae "$T/wout.png" "$T/woutexp.png")
 [ "$d" = 0 ] && [ "$o" = 0 ] && pass "a magnifier control shows its source at 200% in its client area, the rest as it is" \
     || fail "magnifier control: $d pixels differ inside, $o outside"
 # only its left half visible (a window over the right half): the right half is left alone
-win window 7 300 200 150 100 600 400 300 200 0 600 400 150 200; shot wclip
-crop wclip 150 200 600 400 wlg; crop wexp 150 200 0 0 wle; l=$(ae "$T/wlg.png" "$T/wle.png")
-crop wclip 150 200 750 400 wrg; crop wbase 150 200 750 400 wre; r=$(ae "$T/wrg.png" "$T/wre.png")
+win window 7 300 200 150 100 40 500 300 200 0 40 500 150 200; shot wclip
+crop wclip 150 200 40 500 wlg; crop wexp 150 200 0 0 wle; l=$(ae "$T/wlg.png" "$T/wle.png")
+crop wclip 150 200 190 500 wrg; crop wbase 150 200 190 500 wre; r=$(ae "$T/wrg.png" "$T/wre.png")
 [ "$l" = 0 ] && [ "$r" = 0 ] && pass "covered in part: only the uncovered part of the control is drawn" \
     || fail "clip: $l pixels differ in the visible half, $r in the covered half"
-win window 7 300 200 150 100 600 400 300 200 1 600 400 300 200; shot winv
-convert "$T/wexp.png" -negate "PNG24:$T/wexpi.png"; crop winv 300 200 600 400 wgi; d=$(ae "$T/wgi.png" "$T/wexpi.png")
+win window 7 300 200 150 100 40 500 300 200 1 40 500 300 200; shot winv
+convert "$T/wexp.png" -negate "PNG24:$T/wexpi.png"; crop winv 300 200 40 500 wgi; d=$(ae "$T/wgi.png" "$T/wexpi.png")
 [ "$d" = 0 ] && pass "a control's colour effect inverts it, only it" || fail "control inverted: $d pixels differ"
 # nothing magnified while a secure prompt is up, controls included
 echo "      SECURE: $(ctl SECURE)"; shot wsec_on; win window 7 off; shot wsec_off
 d=$(ae "$T/wsec_on.png" "$T/wsec_off.png"); echo "      RELEASE: $(ctl RELEASE)"
 [ "$d" = 0 ] && pass "a magnifier control draws nothing while a secure prompt is up" || fail "a control was drawn over the secure prompt ($d pixels)"
 # the screen view's owner ending does not end the control; the control's connection does
-win window 7 300 200 150 100 600 400 300 200 0 600 400 300 200
+# under a Linux program's window (the Wayland one, above the Wine desktop): that part is not drawn over
+win window 7 300 200 150 100 600 350 300 200 0 600 350 300 200; shot wunder
+crop wunder 200 40 620 365 wug; crop wbase 200 40 620 365 wue; u=$(ae "$T/wug.png" "$T/wue.png")
+zoomed wbase 150 100 300 200 wexp2; crop wexp2 300 70 0 130 wle2; crop wunder 300 70 600 480 wlg2; v=$(ae "$T/wlg2.png" "$T/wle2.png")
+[ "$u" = 0 ] && [ "$v" = 0 ] && pass "a control partly under a Linux program's window: that window stays on top, the rest is magnified" \
+    || fail "control under a Linux window: $u pixels of that window drawn over, $v differ in the rest"
+win window 7 300 200 150 100 40 500 300 200 0 40 500 300 200
 mag lens 200 300 200; mag off; shot wafter
-crop wafter 300 200 600 400 wag; d=$(ae "$T/wag.png" "$T/wexp.png")
+crop wafter 300 200 40 500 wag; d=$(ae "$T/wag.png" "$T/wexp.png")
 [ "$d" = 0 ] && pass "the screen's view going off leaves the control's view" || fail "the control's view went with the screen's ($d)"
 exec 4>&-; sleep 1; shot wgone; d=$(ae "$T/wgone.png" "$T/wbase.png")
 [ "$d" = 0 ] && pass "the control's connection closing ends its view" || fail "after the control's connection closed: $d pixels differ"
