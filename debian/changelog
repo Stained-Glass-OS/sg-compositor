@@ -1,3 +1,17 @@
+sg-compositor (0.2.0+sg70) unstable; urgency=medium
+
+  * Magnifier: the coordinates a controller gives (the docked band, the
+    point it is centred on when it follows the focus or the text cursor, a
+    full-screen origin from MagSetFullscreenTransform) are the Wine
+    desktop's, its top left 0,0 as the virtual screen's is for Windows
+    programs, wherever the desktop sits in the layout: with displays
+    arranged so it does not start at 0,0 they landed on the wrong place or
+    the wrong display. An X pixel is a layout pixel at any display scale.
+    Gate test-magnify (a display moved to 200,100), mutant
+    MAGNIFY_LAYOUT_COORDS.
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Tue, 17 Nov 2026 14:30:00 -0800
+
 sg-compositor (0.2.0+sg69) unstable; urgency=medium
 
   * Magnifier is drawn by the compositor (magnifier.c), as Windows' desktop

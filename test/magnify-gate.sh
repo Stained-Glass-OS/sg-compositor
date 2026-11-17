@@ -17,8 +17,13 @@
 #   - a secure prompt and a lock are never magnified (the same picture as with
 #     magnification off), and it comes back after
 #   - the connection closing ends it
+#   - coordinates given (a docked band, its centre, a full-screen origin) are
+#     the Wine desktop's, wherever it sits: with the display moved to 200,100
+#     in the layout, the band is still at the display's top and shows what is
+#     round the centre given
 # Mutants (--mutants): SG_MUTANT_MAGNIFY_WHEN_SECURE, SG_MUTANT_MAGNIFY_NO_FOLLOW
-# (the origin left at 0,0), SG_MUTANT_MAGNIFY_NO_INVERT.
+# (the origin left at 0,0), SG_MUTANT_MAGNIFY_NO_INVERT,
+# SG_MUTANT_MAGNIFY_LAYOUT_COORDS (coordinates taken as the layout's).
 #   WINE=/path/to/wine sh test/magnify-gate.sh [--mutants]   (no WINE: no Windows window)
 #   MAG_RENDERER=gles2 WLR_RENDER_DRM_DEVICE=/dev/dri/renderD128: on the GPU (inverting with GL)
 set -u
@@ -30,7 +35,7 @@ unset DISPLAY WAYLAND_DISPLAY XAUTHORITY
 
 if [ "${1:-}" = --mutants ]; then
     rc=0
-    for m in MAGNIFY_WHEN_SECURE MAGNIFY_NO_FOLLOW MAGNIFY_NO_INVERT; do
+    for m in MAGNIFY_WHEN_SECURE MAGNIFY_NO_FOLLOW MAGNIFY_NO_INVERT MAGNIFY_LAYOUT_COORDS; do
         b=$(mktemp -d /var/tmp/sg-magnify-mutant.XXXXXX)
         if ! { meson setup "$b" "$HERE" -Dc_args=-DSG_MUTANT_$m >/dev/null 2>&1 && ninja -C "$b" sg-compositor >/dev/null 2>&1; }; then
             echo "SKIP: cannot build the mutant"; rm -rf "$b"; exit 77
@@ -56,7 +61,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 pass() { echo "PASS  $*"; }
 fail() { echo "FAIL  $*"; RC=1; }
-for t in grim convert compare xterm Xwayland python3 wayland-scanner pkg-config cc; do command -v "$t" >/dev/null || { echo "SKIP: $t missing"; exit 77; }; done
+for t in grim convert compare xterm Xwayland python3 wayland-scanner pkg-config cc wlr-randr; do command -v "$t" >/dev/null || { echo "SKIP: $t missing"; exit 77; }; done
 [ -x "$COMP" ] || { echo "SKIP: no compositor at $COMP"; exit 77; }
 XS=$(pkg-config --variable=pkgdatadir wayland-protocols 2>/dev/null)/stable/xdg-shell/xdg-shell.xml
 [ -r "$XS" ] || { echo "SKIP: no xdg-shell.xml"; exit 77; }
@@ -83,7 +88,7 @@ fi
 export XDG_RUNTIME_DIR="$T" XDG_CONFIG_HOME="$T/cfg"
 SG_OUTPUT_SIZE=1024x768 WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 WLR_RENDERER="${MAG_RENDERER:-pixman}" \
     "$COMP" -L "$T/priv.sock" -C "$T/ctl.sock" -U "$(id -u)" -- \
-    sh -c "echo \$\$ > $T/client; xterm -geometry 50x12+0+0 -bg '#ffff00' -fg '#ffff00' -e sleep 600 & sleep 1; $T/wlapp -c 00ff00 -s 700x120 > $T/app.log 2>&1 & $WINECMD > $T/wine.log 2>&1 & echo up > $T/d; exec sleep 600" \
+    sh -c "echo \$\$ > $T/client; xterm -class explorer.exe -T 'shell - Wine Desktop' -geometry 20x5 -bg '#000080' -fg '#000080' -e sleep 600 & sleep 1; xterm -geometry 50x12+0+0 -bg '#ffff00' -fg '#ffff00' -e sleep 600 & sleep 1; $T/wlapp -c 00ff00 -s 700x120 > $T/app.log 2>&1 & $WINECMD > $T/wine.log 2>&1 & echo up > $T/d; exec sleep 600" \
     >"$T/log" 2>&1 &
 CP=$!
 _w=0; while [ ! -s "$T/d" ] && [ $_w -lt 50 ]; do sleep 0.2; _w=$((_w+1)); done
@@ -187,6 +192,20 @@ secure_case() { # ENGAGE RELEASE NAME
 mag smooth 0
 secure_case SECURE RELEASE "secure prompt"
 secure_case LOCK UNLOCK "lock"
+
+# ---- coordinates are the Wine desktop's, wherever it is in the layout ----
+WAYLAND_DISPLAY="$T/priv.sock" wlr-randr --output HEADLESS-1 --pos 200,100 >/dev/null 2>&1; sleep 1.5
+ptr 600 600; shot mbase
+mag smooth 0; mag centre 300 300; mag dock 200 0 0 $W 200; shot mdock
+zoomed mbase $((W / 2)) 100 $((300 - W / 4 < 0 ? 0 : 300 - W / 4)) 250 mdexp; crop mdock "$W" 200 0 0 mdgot
+d=$(ae "$T/mdgot.png" "$T/mdexp.png")
+[ "$d" = 0 ] && pass "display moved to 200,100: the docked band is at its top, showing what is round the centre given" \
+    || fail "display moved: the docked band differs in $d pixels (coordinates taken as the layout's?)"
+mag centre pointer; mag full 200 100 50; shot morg
+zoomed mbase $((W / 2)) $((H / 2)) 100 50 moexp; d=$(ae "$T/morg.png" "$T/moexp.png")
+[ "$d" = 0 ] && pass "display moved: a full-screen origin given (100,50) is the desktop's" || fail "display moved: full screen from 100,50 differs in $d pixels"
+mag off
+WAYLAND_DISPLAY="$T/priv.sock" wlr-randr --output HEADLESS-1 --pos 0,0 >/dev/null 2>&1; sleep 1.5
 
 # ---- the connection closing ends it ----
 ptr 300 260; mag full 200; exec 3>&-; sleep 1; shot closed; shot plain2

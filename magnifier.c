@@ -28,7 +28,11 @@
  * Its lines, each answered "OK" or "ERR":
  *   off | full Z [X Y] | lens Z W H | dock Z X Y W H | centre pointer |
  *   centre X Y | invert 0|1 | smooth 0|1
- * Z is percent, coordinates are layout (screen) pixels.
+ * Z is percent. Coordinates are the Wine desktop's -- its top left is 0,0,
+ * as for Windows programs the virtual screen's top left is (the controller
+ * takes that off) -- so they hold wherever the desktop sits in the layout
+ * (displays left of or above the first, a layout not at 0,0); with no Wine
+ * desktop they are the layout's. An X pixel is a layout pixel at any scale.
  */
 
 #define _POSIX_C_SOURCE 200809L
@@ -62,6 +66,29 @@
 #include "output.h"
 #include "seat.h"
 #include "server.h"
+#include "view.h"
+#if CAGE_HAS_XWAYLAND
+#include "xwayland.h"
+#endif
+
+/* where the controller's coordinates start in the layout: the Wine desktop's top left */
+static void
+given_origin(struct cg_server *server, double *x, double *y)
+{
+	*x = *y = 0;
+#if CAGE_HAS_XWAYLAND
+	struct cg_view *view;
+	wl_list_for_each (view, &server->views, link) {
+		if (view->type == CAGE_XWAYLAND_VIEW && xwayland_view_is_shell_desktop(view)) {
+#ifndef SG_MUTANT_MAGNIFY_LAYOUT_COORDS
+			*x = view->lx;
+			*y = view->ly;
+#endif
+			return;
+		}
+	}
+#endif
+}
 
 static void
 schedule_all(struct cg_server *server, bool whole)
@@ -561,13 +588,17 @@ magnifier_render_output(struct cg_output *output)
 	double scale = wo->scale > 0 ? wo->scale : 1.0;
 	struct wlr_cursor *cursor = server->seat->cursor;
 	double px = clampd((cursor->x - ob.x) * scale, 0, W), py = clampd((cursor->y - ob.y) * scale, 0, H);
+	/* the output's top left in the controller's coordinates */
+	double dx, dy;
+	given_origin(server, &dx, &dy);
+	double gx = ob.x - dx, gy = ob.y - dy;
 	struct wlr_box whole = {0, 0, (int) W, (int) H}, inverted = whole;
 
 	if (m->mode == CG_MAGNIFIER_FULL) {
 		double sw = W / z, sh = H / z, sx, sy;
 		if (m->origin_given) {
-			sx = (m->origin_x - ob.x) * scale;
-			sy = (m->origin_y - ob.y) * scale;
+			sx = (m->origin_x - gx) * scale;
+			sy = (m->origin_y - gy) * scale;
 		} else {
 			/* the point under the pointer stays under the pointer */
 			sx = px - px / z;
@@ -589,14 +620,14 @@ magnifier_render_output(struct cg_output *output)
 			view = (struct wlr_box){(int) clampd(px - lw / 2.0, 0, W - lw), (int) clampd(py - lh / 2.0, 0, H - lh),
 						lw, lh};
 		} else {
-			struct wlr_box dock = {(int) lround((m->dock.x - ob.x) * scale), (int) lround((m->dock.y - ob.y) * scale),
+			struct wlr_box dock = {(int) lround((m->dock.x - gx) * scale), (int) lround((m->dock.y - gy) * scale),
 					       (int) lround(m->dock.width * scale), (int) lround(m->dock.height * scale)};
 			if (!wlr_box_intersection(&view, &dock, &whole)) {
 				view = (struct wlr_box){0};
 			}
 			if (m->centre_given) {
-				cx = clampd((m->centre_x - ob.x) * scale, 0, W);
-				cy = clampd((m->centre_y - ob.y) * scale, 0, H);
+				cx = clampd((m->centre_x - gx) * scale, 0, W);
+				cy = clampd((m->centre_y - gy) * scale, 0, H);
 			}
 		}
 		if (!wlr_box_empty(&view)) {
