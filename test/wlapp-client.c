@@ -3,10 +3,11 @@
  * xdg_toplevel filled with one colour, as Electron 39+, a GTK 4 or a Qt 6
  * program opens when it decides on Wayland.
  *
- *   wlapp-client [-v VERSION] [-c RRGGBB] [-s WxH] [-m] [-f] [-a APP_ID] [-t TITLE] [-r]
+ *   wlapp-client [-v VERSION] [-c RRGGBB] [-s WxH] [-m] [-f] [-o OUTPUT] [-a APP_ID] [-t TITLE] [-r]
  *     -v  the xdg_wm_base version to bind (default: the compositor's)
  *     -s  its own size, used when the compositor leaves it the choice
- *     -m  asks to be maximized, -f full screen, before it maps
+ *     -m  asks to be maximized, -f full screen, before it maps; -o on that output (wl_output's
+ *         name, as sdl-freerdp3 /multimon asks for a window on each display)
  *     -r  a button press resizes it from its bottom-right corner, not moves it
  * A button press over it asks the compositor to move it (its own title bar,
  * as a client-side decorated window's). It prints each configure ("configure
@@ -18,6 +19,7 @@
 #define _GNU_SOURCE
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
@@ -36,11 +38,34 @@ static struct wl_buffer *buffer;
 static uint32_t colour = 0xff0000ff;
 static int own_w = 400, own_h = 300, cur_w, cur_h, want_version;
 static bool resize_on_press, closed;
+static struct wl_output *outputs[8];
+static char *output_names[8];
+static int output_count;
+
+static void out_geometry(void *d, struct wl_output *o, int32_t x, int32_t y, int32_t pw, int32_t ph, int32_t sp,
+			 const char *make, const char *model, int32_t t) {}
+static void out_mode(void *d, struct wl_output *o, uint32_t f, int32_t w, int32_t h, int32_t r) {}
+static void out_done(void *d, struct wl_output *o) {}
+static void out_scale(void *d, struct wl_output *o, int32_t f) {}
+static void
+out_name(void *data, struct wl_output *o, const char *name)
+{
+	output_names[(intptr_t) data] = strdup(name);
+}
+static void out_description(void *d, struct wl_output *o, const char *desc) {}
+static const struct wl_output_listener output_listener = {
+	out_geometry, out_mode, out_done, out_scale, out_name, out_description,
+};
 
 static void
 global(void *data, struct wl_registry *registry, uint32_t name, const char *interface, uint32_t version)
 {
 	(void) data;
+	if (!strcmp(interface, wl_output_interface.name) && version >= 4 && output_count < 8) {
+		outputs[output_count] = wl_registry_bind(registry, name, &wl_output_interface, 4);
+		wl_output_add_listener(outputs[output_count], &output_listener, (void *) (intptr_t) output_count);
+		output_count++;
+	}
 	if (!strcmp(interface, wl_compositor_interface.name)) {
 		compositor = wl_registry_bind(registry, name, &wl_compositor_interface, 4);
 	} else if (!strcmp(interface, wl_shm_interface.name)) {
@@ -252,15 +277,17 @@ main(int argc, char **argv)
 {
 	const char *app_id = "org.example.WlApp", *title = "Wayland test window";
 	bool maximize = false, fullscreen = false;
+	const char *on_output = NULL;
 	int opt;
 
-	while ((opt = getopt(argc, argv, "v:c:s:mfa:t:r")) != -1) {
+	while ((opt = getopt(argc, argv, "v:c:s:mfo:a:t:r")) != -1) {
 		switch (opt) {
 		case 'v': want_version = atoi(optarg); break;
 		case 'c': colour = parse_colour(optarg); break;
 		case 's': sscanf(optarg, "%dx%d", &own_w, &own_h); break;
 		case 'm': maximize = true; break;
 		case 'f': fullscreen = true; break;
+		case 'o': on_output = optarg; break;
 		case 'a': app_id = optarg; break;
 		case 't': title = optarg; break;
 		case 'r': resize_on_press = true; break;
@@ -275,6 +302,7 @@ main(int argc, char **argv)
 	struct wl_registry *registry = wl_display_get_registry(display);
 	wl_registry_add_listener(registry, &registry_listener, NULL);
 	wl_display_roundtrip(display);
+	wl_display_roundtrip(display);   /* the outputs' names */
 	if (!compositor || !shm || !wm_base) {
 		fprintf(stderr, "missing globals\n");
 		return 1;
@@ -294,7 +322,17 @@ main(int argc, char **argv)
 		xdg_toplevel_set_maximized(toplevel);
 	}
 	if (fullscreen) {
-		xdg_toplevel_set_fullscreen(toplevel, NULL);
+		struct wl_output *out = NULL;
+		for (int i = 0; on_output && i < output_count; i++) {
+			if (output_names[i] && !strcmp(output_names[i], on_output)) {
+				out = outputs[i];
+			}
+		}
+		if (on_output && !out) {
+			fprintf(stderr, "no output %s\n", on_output);
+			return 1;
+		}
+		xdg_toplevel_set_fullscreen(toplevel, out);
 	}
 	wl_surface_commit(surface);
 	printf("version %u\n", wl_proxy_get_version((struct wl_proxy *) wm_base));

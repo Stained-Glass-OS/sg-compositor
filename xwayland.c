@@ -146,12 +146,10 @@ destroy(struct cg_view *view)
 }
 
 static void
-handle_xwayland_surface_request_fullscreen(struct wl_listener *listener, void *data)
+set_x_fullscreen(struct cg_xwayland_view *xwayland_view, bool on)
 {
-	struct cg_xwayland_view *xwayland_view = wl_container_of(listener, xwayland_view, request_fullscreen);
 	struct wlr_xwayland_surface *xwayland_surface = xwayland_view->xwayland_surface;
 	struct cg_view *view = &xwayland_view->view;
-	bool on = xwayland_surface->fullscreen;
 	wlr_xwayland_surface_set_fullscreen(xwayland_view->xwayland_surface, on);
 	decor_set_fullscreen(view, on);
 	/* sg-compositor: full screen is the display it is on, put there by us
@@ -178,6 +176,47 @@ handle_xwayland_surface_request_fullscreen(struct wl_listener *listener, void *d
 		}
 		wlr_xwayland_surface_configure(xwayland_surface, r.x, r.y, r.width, r.height);
 	}
+}
+
+/* sg-compositor: a window full screen from its start (_NET_WM_STATE set before it is mapped, as
+ * SDL sets it) is full screen. wlroots reads the window's properties only when its wl_surface comes
+ * (associate), and writes _NET_WM_STATE from what it knows when the window is mapped (withdrawn
+ * no more, xwm.c): when the map came first, the program's full screen was overwritten with none,
+ * and the window left at its own size -- one time in four or so (sdl-freerdp3 /f, /multimon).
+ * Read here, at its request to be mapped, before that. */
+static void
+handle_xwayland_surface_map_request(struct wl_listener *listener, void *data)
+{
+	struct cg_xwayland_view *xwayland_view = wl_container_of(listener, xwayland_view, map_request);
+	struct wlr_xwayland_surface *xs = xwayland_view->xwayland_surface;
+	struct cg_server *server = xwayland_view->view.server;
+	xcb_connection_t *c = server->xwayland ? wlr_xwayland_get_xwm_connection(server->xwayland) : NULL;
+	xcb_intern_atom_reply_t *a, *f;
+	xcb_get_property_reply_t *r;
+
+	if (!c || xs->fullscreen) {
+		return;
+	}
+	a = xcb_intern_atom_reply(c, xcb_intern_atom(c, 0, strlen("_NET_WM_STATE"), "_NET_WM_STATE"), NULL);
+	f = xcb_intern_atom_reply(c, xcb_intern_atom(c, 0, strlen("_NET_WM_STATE_FULLSCREEN"), "_NET_WM_STATE_FULLSCREEN"), NULL);
+	if (a && f && (r = xcb_get_property_reply(c, xcb_get_property(c, 0, xs->window_id, a->atom, XCB_ATOM_ATOM, 0, 32), NULL))) {
+		xcb_atom_t *v = xcb_get_property_value(r);
+		for (int i = 0; i < xcb_get_property_value_length(r) / 4; i++) {
+			if (v[i] == f->atom) {
+				xs->fullscreen = true;
+			}
+		}
+		free(r);
+	}
+	free(a);
+	free(f);
+}
+
+static void
+handle_xwayland_surface_request_fullscreen(struct wl_listener *listener, void *data)
+{
+	struct cg_xwayland_view *xwayland_view = wl_container_of(listener, xwayland_view, request_fullscreen);
+	set_x_fullscreen(xwayland_view, xwayland_view->xwayland_surface->fullscreen);
 }
 
 /* sg-compositor: an override-redirect window moves itself; follow it. */
@@ -273,6 +312,10 @@ handle_xwayland_surface_map(struct wl_listener *listener, void *data)
 {
 	struct cg_xwayland_view *xwayland_view = wl_container_of(listener, xwayland_view, map);
 	struct cg_view *view = &xwayland_view->view;
+#ifndef SG_MUTANT_X_FULLSCREEN_AT_MAP_IGNORED
+	/* where it asked to be, before it is placed */
+	int asked_x = xwayland_view->xwayland_surface->x, asked_y = xwayland_view->xwayland_surface->y;
+#endif
 
 	if (!xwayland_view_should_manage(view)) {
 		view->lx = xwayland_view->xwayland_surface->x;
@@ -301,6 +344,16 @@ handle_xwayland_surface_map(struct wl_listener *listener, void *data)
 			view_position(view);
 		}
 		wlr_xwayland_surface_configure(xs, view->lx, view->ly, xs->width, xs->height);
+#ifndef SG_MUTANT_X_FULLSCREEN_AT_MAP_IGNORED
+		/* sg-compositor: full screen from its start (_NET_WM_STATE set before it mapped, as SDL
+		 * sets it): full screen on the display it asked to be on, as a window manager makes it --
+		 * it was left at its own size, centred (sdl-freerdp3 /f and /multimon's first window) */
+		if (xs->fullscreen) {
+			view->lx = asked_x;
+			view->ly = asked_y;
+			set_x_fullscreen(xwayland_view, true);
+		}
+#endif
 		xwayland_surface_restack_above(xs);
 		/* the taskbar frames it in a moment: shown then, in its frame */
 		session_x11_hold(view);
@@ -321,6 +374,7 @@ handle_xwayland_surface_destroy(struct wl_listener *listener, void *data)
 	session_x11_unhold(view);
 	wl_list_remove(&xwayland_view->destroy.link);
 	wl_list_remove(&xwayland_view->request_fullscreen.link);
+	wl_list_remove(&xwayland_view->map_request.link);
 	if (view->elevated) {
 		elevated_view_unlisten(xwayland_view);
 	} else {
@@ -385,6 +439,12 @@ xwayland_view_create(struct cg_server *server, struct wlr_xwayland_surface *xway
 	wl_signal_add(&xwayland_surface->events.destroy, &xwayland_view->destroy);
 	xwayland_view->request_fullscreen.notify = handle_xwayland_surface_request_fullscreen;
 	wl_signal_add(&xwayland_surface->events.request_fullscreen, &xwayland_view->request_fullscreen);
+	xwayland_view->map_request.notify = handle_xwayland_surface_map_request;
+#ifndef SG_MUTANT_X_FULLSCREEN_AT_MAP_IGNORED
+	wl_signal_add(&xwayland_surface->events.map_request, &xwayland_view->map_request);
+#else
+	wl_list_init(&xwayland_view->map_request.link);
+#endif
 	if (elevated) {
 		elevated_view_listen(xwayland_view);
 	} else {

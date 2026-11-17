@@ -15,6 +15,7 @@ struct cg_xwayland_view {
 	struct wl_listener unmap;
 	struct wl_listener map;
 	struct wl_listener request_fullscreen;
+	struct wl_listener map_request;
 
 	/* sg-compositor: an elevated display's windows are managed windows --
 	 * placed, moved, resized, minimised and maximised as they ask. */

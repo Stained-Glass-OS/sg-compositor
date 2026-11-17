@@ -18,7 +18,7 @@ install: build
 # The gate is sg-session's own session gate, run with this compositor hosting
 # the session instead of cage. Milestone 1 of ADR 0011 is exactly "that still
 # passes", so the gate is the same one, not a new one.
-test: test-session test-lock test-secure test-secure-dim test-xwindows test-privileged test-sas test-power test-elevated test-popup test-backdrop test-xfloat test-decor test-decorlook test-decorsmooth test-capture test-wmreq test-jumpclick test-bigwindow test-desktopfront test-selfmove test-deskcomp test-bgpart test-glassframe test-animbg test-embedfocus test-pen test-touchcursor test-unmapcfg test-wlapp test-wtsevents test-sessionend test-onedisplay test-inputconf
+test: test-session test-lock test-secure test-secure-dim test-xwindows test-privileged test-sas test-power test-elevated test-popup test-backdrop test-xfloat test-decor test-decorlook test-decorsmooth test-capture test-wmreq test-jumpclick test-bigwindow test-desktopfront test-selfmove test-deskcomp test-bgpart test-glassframe test-animbg test-embedfocus test-pen test-touchcursor test-unmapcfg test-wlapp test-wtsevents test-sessionend test-onedisplay test-inputconf test-xfsmap test-wlfsout
 
 test-session: build
 	@[ -d "$(SG_SESSION)" ] || { echo "sg-session checkout not found at $(SG_SESSION)"; exit 2; }
@@ -147,6 +147,16 @@ test-inputconf: build
 .PHONY: test-onedisplay
 test-onedisplay: build
 	@SG_COMPOSITOR_BIN=$(CURDIR)/$(BUILD)/sg-compositor sh test/onedisplay-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc
+
+# An X window full screen from its start fills the display it asked to be on.
+.PHONY: test-xfsmap
+test-xfsmap: build
+	@SG_COMPOSITOR_BIN=$(CURDIR)/$(BUILD)/sg-compositor sh test/xfsmap-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc
+
+# A Wayland window full screen on the output it names (sdl-freerdp3 /multimon).
+.PHONY: test-wlfsout
+test-wlfsout: build
+	@SG_COMPOSITOR_BIN=$(CURDIR)/$(BUILD)/sg-compositor sh test/wlfsout-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc
 
 .PHONY: test-hidpi
 test-hidpi: build

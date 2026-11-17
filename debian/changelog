@@ -1,3 +1,21 @@
+sg-compositor (0.2.0+sg68) unstable; urgency=medium
+
+  * An X window full screen from its start (_NET_WM_STATE set before it
+    maps, as SDL sets it: sdl-freerdp3 /f and /multimon) fills the display
+    it asked to be on (xwayland.c). It was left at its own size, centred:
+    only a request made after the map was honoured, and wlroots wrote the
+    window's state at the map from what it had read so far, overwriting
+    the program's full screen about one time in four. The state is read at
+    the window's map request now. Gate test-xfsmap, mutant
+    SG_MUTANT_X_FULLSCREEN_AT_MAP_IGNORED.
+  * A native Wayland window full screen on the output it names
+    (xdg_toplevel.set_fullscreen with an output), as sdl-freerdp3
+    /multimon puts one window on each display (wayland_app.c): both went
+    to the display the window was on, one over the other. Gate
+    test-wlfsout, mutant SG_MUTANT_WAYLAND_FULLSCREEN_OUTPUT_IGNORED.
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Tue, 17 Nov 2026 15:00:00 -0800
+
 sg-compositor (0.2.0+sg67) unstable; urgency=medium
 
   * A Linux program's menus stay open while its window is framed by the

@@ -43,6 +43,7 @@
 #include <unistd.h>
 #include <wayland-server-core.h>
 #include <wlr/types/wlr_cursor.h>
+#include <wlr/types/wlr_output_layout.h>
 #include <wlr/types/wlr_scene.h>
 #include <wlr/types/wlr_seat.h>
 #include <wlr/types/wlr_xdg_shell.h>
@@ -176,6 +177,24 @@ set_maximized(struct cg_view *view, bool on)
 	view->user_placed = true;
 }
 
+/* the display it is full screen on: the one it asked for (xdg_toplevel.set_fullscreen with an
+ * output -- sdl-freerdp3 /multimon puts a window on each display so), or the one it is on */
+static void
+fullscreen_box(struct cg_view *view, struct wlr_box *box)
+{
+#ifndef SG_MUTANT_WAYLAND_FULLSCREEN_OUTPUT_IGNORED
+	struct cg_server *server = view->server;
+	struct wlr_output *out = xv_of(view)->xdg_toplevel->requested.fullscreen_output;
+	if (out && out->enabled && !(server->remote && server->remote_output)) {
+		wlr_output_layout_get_box(server->output_layout, out, box);
+		if (!wlr_box_empty(box)) {
+			return;
+		}
+	}
+#endif
+	view_get_output_box(view, box);
+}
+
 static void
 set_fullscreen(struct cg_view *view, bool on)
 {
@@ -192,7 +211,7 @@ set_fullscreen(struct cg_view *view, bool on)
 			xv->windowed = (struct wlr_box){view->lx + geom.x, view->ly + geom.y, geom.width, geom.height};
 		}
 		xv->fullscreen = true;
-		view_get_output_box(view, &layout);
+		fullscreen_box(view, &layout);
 		wlr_xdg_toplevel_set_size(tl, layout.width, layout.height);
 		wlr_xdg_toplevel_set_fullscreen(tl, true);
 		place(view, layout.x, layout.y);
@@ -488,7 +507,7 @@ wayland_app_initial_configure(struct cg_view *view)
 		wlr_xdg_toplevel_set_bounds(tl, work.width, work.height);
 	}
 	if (tl->requested.fullscreen || xv->want_fullscreen) {
-		view_get_output_box(view, &layout);
+		fullscreen_box(view, &layout);
 		wlr_xdg_toplevel_set_size(tl, layout.width, layout.height);
 		wlr_xdg_toplevel_set_fullscreen(tl, true);
 		xv->want_fullscreen = true;
@@ -514,7 +533,7 @@ wayland_app_place(struct cg_view *view)
 		xv->fullscreen = true;
 	}
 	if (xv->fullscreen) {
-		view_get_output_box(view, &layout);
+		fullscreen_box(view, &layout);
 		wlr_xdg_toplevel_set_size(xv->xdg_toplevel, layout.width, layout.height);
 		place(view, layout.x, layout.y);
 		return;
