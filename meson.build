@@ -50,6 +50,9 @@ xkbcommon      = dependency('xkbcommon')
 libdrm         = dependency('libdrm')
 # sg-compositor: a pen's bus (built in or a USB tablet), seat.c
 libinput       = dependency('libinput')
+# sg-compositor: Magnifier's inverted colours on GL (magnifier.c)
+egl            = dependency('egl')
+glesv2         = dependency('glesv2')
 math           = cc.find_library('m')
 
 wl_protocol_dir = wayland_protos.get_variable('pkgdatadir')
@@ -138,6 +141,7 @@ endif
 cage_sources = [
   'backdrop.c',
   'lock.c',
+  'magnifier.c',
   'public_capture.c',
   'elevated.c',
   'session_x11.c',
@@ -159,6 +163,7 @@ cage_headers = [
   'elevated.h',
   'public_capture.h',
   'idle_inhibit_v1.h',
+  'magnifier.h',
   'output.h',
   'seat.h',
   'server.h',
@@ -185,6 +190,8 @@ executable(
     libinput,
     freetype,
     xcb,
+    egl,
+    glesv2,
     math,
   ],
   install: true,

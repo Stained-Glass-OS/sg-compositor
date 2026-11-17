@@ -3,6 +3,7 @@
 
 #include "config.h"
 #include "lock.h"
+#include "magnifier.h"
 
 #include <wayland-server-core.h>
 #include <wlr/types/wlr_idle_inhibit_v1.h>
@@ -111,6 +112,8 @@ struct cg_server {
 	 * the prompt (lock.c) */
 	struct wlr_scene_rect *dim_rect;
 	struct wlr_compositor *compositor;
+	/* sg-compositor: Magnifier, drawn here (magnifier.c) */
+	struct cg_magnifier magnifier;
 #if CAGE_HAS_XWAYLAND
 	struct wlr_xwayland *xwayland; /* the session's own */
 #endif

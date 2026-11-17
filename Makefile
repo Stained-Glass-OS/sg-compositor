@@ -166,6 +166,14 @@ test-hidpi: build
 test-xfloat: build
 	@SG_COMPOSITOR_BIN=$(CURDIR)/$(BUILD)/sg-compositor sh test/xfloat-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc
 
+# Magnifier drawn by the compositor (magnifier.c): full screen, lens, docked,
+# inverted, never over a lock or a secure prompt, for X, Wayland and (with
+# WINE=) Windows programs' windows; and its mutants.
+.PHONY: test-magnify
+test-magnify: build
+	@SG_COMPOSITOR_BIN=$(CURDIR)/$(BUILD)/sg-compositor sh test/magnify-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc
+	@sh test/magnify-gate.sh --mutants; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc
+
 # sg-deskcomp: the Wine desktop's compositor -- shadows, real alpha, window
 # effects (needs wine-sg with 0744; 77 = a prerequisite missing). And its
 # mutants: the gate must fail with each.

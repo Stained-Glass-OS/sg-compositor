@@ -22,6 +22,7 @@
 #if WLR_HAS_X11_BACKEND
 #include <wlr/backend/x11.h>
 #endif
+#include <wlr/render/swapchain.h>
 #include <wlr/render/wlr_renderer.h>
 #include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_data_device.h>
@@ -170,7 +171,9 @@ handle_output_frame(struct wl_listener *listener, void *data)
 		return;
 	}
 
-	wlr_scene_output_commit(output->scene_output, NULL);
+	if (!magnifier_render_output(output)) {
+		wlr_scene_output_commit(output->scene_output, NULL);
+	}
 	/* the previous frame is presented: buffers let go before it are free */
 	cg_syncobj_frame();
 
@@ -246,6 +249,7 @@ output_destroy(struct cg_output *output)
 	wl_list_remove(&output->link);
 
 	output_layout_remove(output);
+	magnifier_output_destroy(output);
 
 	free(output);
 

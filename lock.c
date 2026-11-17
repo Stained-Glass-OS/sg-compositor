@@ -497,7 +497,7 @@ shadow_attach(struct cg_lock *lock, int fd, bool control, char *reply, size_t le
 	return true;
 }
 
-/* One command per connection: LOCK, UNLOCK, SECURE, RELEASE, SAS <action>, WATCH, SESSION, INHIBIT, IDLE, STATUS,
+/* One command per connection: LOCK, UNLOCK, SECURE, RELEASE, SAS <action>, WATCH, SESSION, INHIBIT, MAGNIFY, IDLE, STATUS,
  * REMOTE (optionally with the remote connection's fd), LOCAL, or SHADOW view|control
  * (with the shadow connection's fd). */
 static int
@@ -632,6 +632,18 @@ handle_control_connection(int fd, uint32_t mask, void *data)
 			if (send(client_fd, "OK inhibited\n", 13, MSG_NOSIGNAL) < 0) {
 				handle_inhibit_event(client_fd, 0, inh);
 			}
+			return 0; /* the connection stays open */
+		}
+	} else if (!strcmp(buf, "MAGNIFY")) {
+		/* Anyone in the session may magnify the screen, as any Windows
+		 * program may (MagSetFullscreenTransform): it says only what to
+		 * show, nothing is sent back but OK; nothing secure is magnified
+		 * (magnifier.c). It lasts as long as the connection does. */
+		if (!uid_may_lock(lock, uid)) {
+			reply = "ERR not permitted\n";
+		} else {
+			fcntl(client_fd, F_SETFL, fcntl(client_fd, F_GETFL) | O_NONBLOCK);
+			magnifier_take_connection(lock->server, client_fd);
 			return 0; /* the connection stays open */
 		}
 	} else if (!strcmp(buf, "IDLE")) {
@@ -922,6 +934,8 @@ isolate(struct cg_lock *lock, const char *event)
 	if (lock_view) {
 		seat_set_focus(server->seat, lock_view);
 	}
+	/* nothing secure is ever magnified */
+	magnifier_state_changed(server);
 }
 
 void
@@ -986,6 +1000,7 @@ unisolate(struct cg_lock *lock, const char *event)
 			break;
 		}
 	}
+	magnifier_state_changed(server);
 }
 
 void

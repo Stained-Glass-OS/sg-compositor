@@ -1,3 +1,22 @@
+sg-compositor (0.2.0+sg69) unstable; urgency=medium
+
+  * Magnifier is drawn by the compositor (magnifier.c), as Windows' desktop
+    window manager draws it: every program is magnified -- Windows ones,
+    X ones in their frames and native Wayland ones -- where magnify.exe
+    could magnify only what Wine paints (David 2026-11-17: "Magnifier does
+    not seem to work on Linux apps"). MAGNIFY on the control socket takes
+    the views: the whole screen round the pointer (the point under the
+    pointer stays under it, so clicks need no change) or from an origin
+    given, a lens round the pointer, a docked band; inverted colours; sharp
+    or smooth scaling. Nothing is magnified while the screen is locked, a
+    consent prompt or the security screen is up; it comes back after. It
+    ends when the connection does. No pixels go to any program.
+    Gate test-magnify (screenshots against the screen scaled, pixel for
+    pixel), mutants MAGNIFY_WHEN_SECURE, MAGNIFY_NO_FOLLOW,
+    MAGNIFY_NO_INVERT.
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Tue, 17 Nov 2026 13:00:00 -0800
+
 sg-compositor (0.2.0+sg68) unstable; urgency=medium
 
   * An X window full screen from its start (_NET_WM_STATE set before it

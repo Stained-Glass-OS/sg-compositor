@@ -382,6 +382,8 @@ main(int argc, char *argv[])
 		return 1;
 	}
 
+	magnifier_init(&server);
+
 	server.display_destroy.notify = handle_display_destroy;
 	wl_display_add_destroy_listener(server.wl_display, &server.display_destroy);
 
@@ -745,6 +747,7 @@ main(int argc, char *argv[])
 	server.xwayland = NULL;
 	wlr_xcursor_manager_destroy(xcursor_manager);
 #endif
+	magnifier_fini(&server);
 	wl_display_destroy_clients(server.wl_display);
 
 end:

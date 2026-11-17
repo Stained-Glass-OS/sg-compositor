@@ -21,6 +21,12 @@ struct cg_output {
 	 * not by configuration -- the next input turns it back on. */
 	bool powered_off;
 
+	/* sg-compositor: Magnifier (magnifier.c): the scene is drawn into these
+	 * and put on the screen scaled */
+	struct wlr_swapchain *mag_swapchain;
+	bool mag_was_active;
+	bool mag_cursor_locked;
+
 	struct wl_list link; // cg_server::outputs
 };
 

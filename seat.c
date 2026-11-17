@@ -1348,6 +1348,7 @@ process_cursor_motion(struct cg_seat *seat, uint32_t time_msec, double dx, doubl
 	struct wlr_surface *surface = NULL;
 
 	cursor_show_after_touch(seat);
+	magnifier_pointer_moved(seat->server);
 	seat_update_cursor_size(seat, false);
 	/* sg-compositor: a program's native Wayland window being moved or
 	 * resized (it asked, from its own title bar) takes the motion */
