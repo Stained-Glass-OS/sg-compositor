@@ -78,7 +78,9 @@ when rebasing onto a newer cage or wlroots. Source file names stay cage's
   screen -- full screen round the pointer (or an origin given), a lens, a
   docked band, inverted colours -- so every kind of window is magnified and
   no pixels go to anyone. Never while locked, secure or on the security
-  screen; it ends when the connection does. Wine's magnification.dll
+  screen; it ends when the connection does. Several connections may be
+  open: window views (`window ID ...`, Wine's magnifier control) belong to
+  theirs. Wine's magnification.dll
   (wine-sg 7845) is the client. `make test-magnify`.
 
 **`make test-lock`** runs a keylogger in the user session and injects keys the

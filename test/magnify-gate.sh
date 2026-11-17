@@ -17,13 +17,18 @@
 #   - a secure prompt and a lock are never magnified (the same picture as with
 #     magnification off), and it comes back after
 #   - the connection closing ends it
+#   - a magnifier control (MagSetWindowSource, from another connection): its
+#     client area shows its source scaled, only through the parts of it
+#     nothing covers (the clip), inverted on request; it goes with its
+#     connection, and the screen's view is not the control's to end
 #   - coordinates given (a docked band, its centre, a full-screen origin) are
 #     the Wine desktop's, wherever it sits: with the display moved to 200,100
 #     in the layout, the band is still at the display's top and shows what is
 #     round the centre given
 # Mutants (--mutants): SG_MUTANT_MAGNIFY_WHEN_SECURE, SG_MUTANT_MAGNIFY_NO_FOLLOW
 # (the origin left at 0,0), SG_MUTANT_MAGNIFY_NO_INVERT,
-# SG_MUTANT_MAGNIFY_LAYOUT_COORDS (coordinates taken as the layout's).
+# SG_MUTANT_MAGNIFY_LAYOUT_COORDS (coordinates taken as the layout's),
+# SG_MUTANT_MAGNIFY_NO_CLIP (a control drawn over what covers it).
 #   WINE=/path/to/wine sh test/magnify-gate.sh [--mutants]   (no WINE: no Windows window)
 #   MAG_RENDERER=gles2 WLR_RENDER_DRM_DEVICE=/dev/dri/renderD128: on the GPU (inverting with GL)
 set -u
@@ -35,7 +40,7 @@ unset DISPLAY WAYLAND_DISPLAY XAUTHORITY
 
 if [ "${1:-}" = --mutants ]; then
     rc=0
-    for m in MAGNIFY_WHEN_SECURE MAGNIFY_NO_FOLLOW MAGNIFY_NO_INVERT MAGNIFY_LAYOUT_COORDS; do
+    for m in MAGNIFY_WHEN_SECURE MAGNIFY_NO_FOLLOW MAGNIFY_NO_INVERT MAGNIFY_LAYOUT_COORDS MAGNIFY_NO_CLIP; do
         b=$(mktemp -d /var/tmp/sg-magnify-mutant.XXXXXX)
         if ! { meson setup "$b" "$HERE" -Dc_args=-DSG_MUTANT_$m >/dev/null 2>&1 && ninja -C "$b" sg-compositor >/dev/null 2>&1; }; then
             echo "SKIP: cannot build the mutant"; rm -rf "$b"; exit 77
@@ -192,6 +197,46 @@ secure_case() { # ENGAGE RELEASE NAME
 mag smooth 0
 secure_case SECURE RELEASE "secure prompt"
 secure_case LOCK UNLOCK "lock"
+
+# ---- a magnifier control: a window view, from a connection of its own ----
+mkfifo "$T/win.in"
+python3 -c "
+import socket, sys
+s = socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); s.sendall(b'MAGNIFY\n')
+print(s.recv(64).decode().strip(), flush=True)
+for line in sys.stdin:
+    s.sendall(line.encode()); print(line.strip(), '->', s.recv(64).decode().strip(), flush=True)
+" "$T/ctl.sock" < "$T/win.in" > "$T/win.out" 2>&1 &
+exec 4>"$T/win.in"
+win() { echo "$*" >&4; sleep 0.6; }
+ptr 5 5; shot wbase; mag smooth 0
+# the source 300,200 150x100 shown in 600,400 300x200 (200%), all of it visible
+win window 7 300 200 150 100 600 400 300 200 0 600 400 300 200; shot wview
+zoomed wbase 150 100 300 200 wexp; crop wview 300 200 600 400 wgot; d=$(ae "$T/wgot.png" "$T/wexp.png")
+crop wview 500 350 0 0 wout; crop wbase 500 350 0 0 woutexp; o=$(ae "$T/wout.png" "$T/woutexp.png")
+[ "$d" = 0 ] && [ "$o" = 0 ] && pass "a magnifier control shows its source at 200% in its client area, the rest as it is" \
+    || fail "magnifier control: $d pixels differ inside, $o outside"
+# only its left half visible (a window over the right half): the right half is left alone
+win window 7 300 200 150 100 600 400 300 200 0 600 400 150 200; shot wclip
+crop wclip 150 200 600 400 wlg; crop wexp 150 200 0 0 wle; l=$(ae "$T/wlg.png" "$T/wle.png")
+crop wclip 150 200 750 400 wrg; crop wbase 150 200 750 400 wre; r=$(ae "$T/wrg.png" "$T/wre.png")
+[ "$l" = 0 ] && [ "$r" = 0 ] && pass "covered in part: only the uncovered part of the control is drawn" \
+    || fail "clip: $l pixels differ in the visible half, $r in the covered half"
+win window 7 300 200 150 100 600 400 300 200 1 600 400 300 200; shot winv
+convert "$T/wexp.png" -negate "PNG24:$T/wexpi.png"; crop winv 300 200 600 400 wgi; d=$(ae "$T/wgi.png" "$T/wexpi.png")
+[ "$d" = 0 ] && pass "a control's colour effect inverts it, only it" || fail "control inverted: $d pixels differ"
+# nothing magnified while a secure prompt is up, controls included
+echo "      SECURE: $(ctl SECURE)"; shot wsec_on; win window 7 off; shot wsec_off
+d=$(ae "$T/wsec_on.png" "$T/wsec_off.png"); echo "      RELEASE: $(ctl RELEASE)"
+[ "$d" = 0 ] && pass "a magnifier control draws nothing while a secure prompt is up" || fail "a control was drawn over the secure prompt ($d pixels)"
+# the screen view's owner ending does not end the control; the control's connection does
+win window 7 300 200 150 100 600 400 300 200 0 600 400 300 200
+mag lens 200 300 200; mag off; shot wafter
+crop wafter 300 200 600 400 wag; d=$(ae "$T/wag.png" "$T/wexp.png")
+[ "$d" = 0 ] && pass "the screen's view going off leaves the control's view" || fail "the control's view went with the screen's ($d)"
+exec 4>&-; sleep 1; shot wgone; d=$(ae "$T/wgone.png" "$T/wbase.png")
+[ "$d" = 0 ] && pass "the control's connection closing ends its view" || fail "after the control's connection closed: $d pixels differ"
+mag smooth 1
 
 # ---- coordinates are the Wine desktop's, wherever it is in the layout ----
 WAYLAND_DISPLAY="$T/priv.sock" wlr-randr --output HEADLESS-1 --pos 200,100 >/dev/null 2>&1; sleep 1.5

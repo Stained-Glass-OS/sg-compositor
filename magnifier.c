@@ -106,7 +106,7 @@ bool
 magnifier_active(struct cg_server *server)
 {
 	const struct cg_magnifier *m = &server->magnifier;
-	if (m->mode == CG_MAGNIFIER_OFF) {
+	if (m->mode == CG_MAGNIFIER_OFF && wl_list_empty(&m->windows)) {
 		return false;
 	}
 #ifndef SG_MUTANT_MAGNIFY_WHEN_SECURE
@@ -128,12 +128,24 @@ magnifier_pointer_moved(struct cg_server *server)
 void
 magnifier_state_changed(struct cg_server *server)
 {
-	if (server->magnifier.mode != CG_MAGNIFIER_OFF) {
+	if (server->magnifier.mode != CG_MAGNIFIER_OFF || !wl_list_empty(&server->magnifier.windows)) {
 		schedule_all(server, true);
 	}
 }
 
 /* ---- the controller ------------------------------------------------------ */
+
+struct cg_mag_conn {
+	struct cg_server *server;
+	int fd;
+	struct wl_event_source *source;
+	char line[1024];
+	size_t len;
+	struct wl_list link;
+};
+
+#define CG_MAG_MAX_CONNS 32
+#define CG_MAG_MAX_WINDOWS 64
 
 static void
 set_off(struct cg_server *server)
@@ -143,13 +155,89 @@ set_off(struct cg_server *server)
 	m->mode = CG_MAGNIFIER_OFF;
 	m->origin_given = m->centre_given = false;
 	m->invert = false;
+	m->owner = NULL;
 	if (was) {
 		schedule_all(server, true);
 	}
 }
 
+static struct cg_mag_window *
+find_window(struct cg_server *server, struct cg_mag_conn *conn, unsigned int id)
+{
+	struct cg_mag_window *w;
+	wl_list_for_each (w, &server->magnifier.windows, link) {
+		if (w->conn == conn && w->id == id) {
+			return w;
+		}
+	}
+	return NULL;
+}
+
+static void
+window_free(struct cg_mag_window *w)
+{
+	wl_list_remove(&w->link);
+	free(w);
+}
+
+/* "window ID off" | "window ID SX SY SW SH DX DY DW DH INVERT [X Y W H]..." */
 static bool
-command(struct cg_server *server, const char *line)
+window_command(struct cg_server *server, struct cg_mag_conn *conn, const char *line)
+{
+	struct cg_magnifier *m = &server->magnifier;
+	unsigned int id;
+	int n = 0, inv;
+	double sx, sy, sw, sh;
+	int dx, dy, dw, dh;
+	char word[8];
+
+	if (sscanf(line, "%u%n", &id, &n) != 1) {
+		return false;
+	}
+	line += n;
+	struct cg_mag_window *w = find_window(server, conn, id);
+	if (sscanf(line, " %7s", word) == 1 && !strcmp(word, "off")) {
+		if (w) {
+			window_free(w);
+			schedule_all(server, true);
+		}
+		return true;
+	}
+	if (sscanf(line, "%lf %lf %lf %lf %d %d %d %d %d%n", &sx, &sy, &sw, &sh, &dx, &dy, &dw, &dh, &inv, &n) != 9 ||
+	    sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0 || dw > 16384 || dh > 16384 || sw > 16384 || sh > 16384) {
+		return false;
+	}
+	line += n;
+	if (!w) {
+		if (wl_list_length(&m->windows) >= CG_MAG_MAX_WINDOWS || !(w = calloc(1, sizeof(*w)))) {
+			return false;
+		}
+		w->conn = conn;
+		w->id = id;
+		wl_list_insert(m->windows.prev, &w->link);
+	}
+	w->sx = sx;
+	w->sy = sy;
+	w->sw = sw;
+	w->sh = sh;
+	w->dst = (struct wlr_box){dx, dy, dw, dh};
+	w->invert = inv != 0;
+	w->n_clip = 0;
+	int cx, cy, cw, ch;
+	while (w->n_clip < CG_MAG_WINDOW_CLIPS && sscanf(line, "%d %d %d %d%n", &cx, &cy, &cw, &ch, &n) == 4) {
+		line += n;
+		struct wlr_box c = {cx, cy, cw, ch};
+		/* only within the control's own client area */
+		if (wlr_box_intersection(&c, &c, &w->dst)) {
+			w->clip[w->n_clip++] = c;
+		}
+	}
+	schedule_all(server, true);
+	return true;
+}
+
+static bool
+command(struct cg_server *server, struct cg_mag_conn *conn, const char *line)
 {
 	struct cg_magnifier *m = &server->magnifier;
 	int z, a, b, c, d, n = 0;
@@ -160,8 +248,12 @@ command(struct cg_server *server, const char *line)
 	}
 	line += n;
 
-	if (!strcmp(word, "off")) {
-		set_off(server);
+	if (!strcmp(word, "window")) {
+		return window_command(server, conn, line);
+	} else if (!strcmp(word, "off")) {
+		if (!m->owner || m->owner == conn) {
+			set_off(server);
+		}
 		return true;
 	} else if (!strcmp(word, "full")) {
 		int k = sscanf(line, "%d %d %d", &z, &a, &b);
@@ -212,64 +304,80 @@ command(struct cg_server *server, const char *line)
 		return false;
 	}
 
+	/* the screen's view is this connection's now */
+	m->owner = conn;
 	m->zoom = z < 100 ? 100 : z > 1600 ? 1600 : z;
 	schedule_all(server, true);
 	return true;
 }
 
 static void
-drop_connection(struct cg_server *server)
+drop_connection(struct cg_mag_conn *conn)
 {
+	struct cg_server *server = conn->server;
 	struct cg_magnifier *m = &server->magnifier;
-	if (m->source) {
-		wl_event_source_remove(m->source);
-		m->source = NULL;
+	struct cg_mag_window *w, *tmp;
+	bool had = false;
+
+	wl_list_for_each_safe (w, tmp, &m->windows, link) {
+		if (w->conn == conn) {
+			window_free(w);
+			had = true;
+		}
 	}
-	if (m->fd >= 0) {
-		close(m->fd);
-		m->fd = -1;
+	if (m->owner == conn) {
+		set_off(server);
 	}
-	m->len = 0;
-	set_off(server);
+	if (conn->source) {
+		wl_event_source_remove(conn->source);
+	}
+	if (conn->fd >= 0) {
+		close(conn->fd);
+	}
+	wl_list_remove(&conn->link);
+	m->n_conns--;
+	free(conn);
+	if (had) {
+		schedule_all(server, true);
+	}
 }
 
 static int
 handle_readable(int fd, uint32_t mask, void *data)
 {
-	struct cg_server *server = data;
-	struct cg_magnifier *m = &server->magnifier;
+	struct cg_mag_conn *conn = data;
 	ssize_t n;
 
 	if (mask & (WL_EVENT_HANGUP | WL_EVENT_ERROR)) {
-		drop_connection(server);
+		drop_connection(conn);
 		return 0;
 	}
-	n = recv(fd, m->line + m->len, sizeof(m->line) - 1 - m->len, 0);
+	n = recv(fd, conn->line + conn->len, sizeof(conn->line) - 1 - conn->len, 0);
 	if (n < 0 && (errno == EAGAIN || errno == EINTR)) {
 		return 0;
 	}
 	if (n <= 0) {
-		drop_connection(server);
+		drop_connection(conn);
 		return 0;
 	}
-	m->len += n;
-	m->line[m->len] = 0;
+	conn->len += n;
+	conn->line[conn->len] = 0;
 
 	char *nl;
-	while ((nl = memchr(m->line, '\n', m->len))) {
+	while ((nl = memchr(conn->line, '\n', conn->len))) {
 		*nl = 0;
-		const char *reply = command(server, m->line) ? "OK\n" : "ERR\n";
-		size_t used = nl + 1 - m->line;
-		memmove(m->line, nl + 1, m->len - used);
-		m->len -= used;
-		m->line[m->len] = 0;
+		const char *reply = command(conn->server, conn, conn->line) ? "OK\n" : "ERR\n";
+		size_t used = nl + 1 - conn->line;
+		memmove(conn->line, nl + 1, conn->len - used);
+		conn->len -= used;
+		conn->line[conn->len] = 0;
 		if (send(fd, reply, strlen(reply), MSG_NOSIGNAL) < 0 && errno != EAGAIN) {
-			drop_connection(server);
+			drop_connection(conn);
 			return 0;
 		}
 	}
-	if (m->len == sizeof(m->line) - 1) {
-		drop_connection(server); /* a line that never ends */
+	if (conn->len == sizeof(conn->line) - 1) {
+		drop_connection(conn); /* a line that never ends */
 	}
 	return 0;
 }
@@ -278,17 +386,21 @@ void
 magnifier_take_connection(struct cg_server *server, int fd)
 {
 	struct cg_magnifier *m = &server->magnifier;
+	struct cg_mag_conn *conn;
 
-	/* one controller: a new Magnifier takes over from an old one */
-	if (m->fd >= 0) {
-		drop_connection(server);
+	if (m->n_conns >= CG_MAG_MAX_CONNS || !(conn = calloc(1, sizeof(*conn)))) {
+		send(fd, "ERR busy\n", 9, MSG_NOSIGNAL);
+		close(fd);
+		return;
 	}
-	m->fd = fd;
-	m->len = 0;
-	m->source = wl_event_loop_add_fd(wl_display_get_event_loop(server->wl_display), fd, WL_EVENT_READABLE,
-					 handle_readable, server);
+	conn->server = server;
+	conn->fd = fd;
+	wl_list_insert(&m->conns, &conn->link);
+	m->n_conns++;
+	conn->source = wl_event_loop_add_fd(wl_display_get_event_loop(server->wl_display), fd, WL_EVENT_READABLE,
+					    handle_readable, conn);
 	if (send(fd, "OK magnify\n", 11, MSG_NOSIGNAL) < 0) {
-		drop_connection(server);
+		drop_connection(conn);
 	}
 }
 
@@ -297,7 +409,8 @@ magnifier_init(struct cg_server *server)
 {
 	struct cg_magnifier *m = &server->magnifier;
 	memset(m, 0, sizeof(*m));
-	m->fd = -1;
+	wl_list_init(&m->conns);
+	wl_list_init(&m->windows);
 	m->zoom = 200;
 	m->smooth = true;
 	m->lens_w = 400;
@@ -308,13 +421,9 @@ void
 magnifier_fini(struct cg_server *server)
 {
 	struct cg_magnifier *m = &server->magnifier;
-	if (m->source) {
-		wl_event_source_remove(m->source);
-		m->source = NULL;
-	}
-	if (m->fd >= 0) {
-		close(m->fd);
-		m->fd = -1;
+	struct cg_mag_conn *conn, *tmp;
+	wl_list_for_each_safe (conn, tmp, &m->conns, link) {
+		drop_connection(conn);
 	}
 }
 
@@ -592,7 +701,9 @@ magnifier_render_output(struct cg_output *output)
 	double dx, dy;
 	given_origin(server, &dx, &dy);
 	double gx = ob.x - dx, gy = ob.y - dy;
-	struct wlr_box whole = {0, 0, (int) W, (int) H}, inverted = whole;
+	struct wlr_box whole = {0, 0, (int) W, (int) H};
+	struct wlr_box inverted[1 + CG_MAG_MAX_WINDOWS * CG_MAG_WINDOW_CLIPS];
+	int n_inverted = 0;
 
 	if (m->mode == CG_MAGNIFIER_FULL) {
 		double sw = W / z, sh = H / z, sx, sy;
@@ -610,6 +721,11 @@ magnifier_render_output(struct cg_output *output)
 		sx = clampd(sx, 0, W - sw);
 		sy = clampd(sy, 0, H - sh);
 		draw_scaled(pass, tex, sx, sy, sw, sh, &whole, m->smooth);
+		if (m->invert) {
+			inverted[n_inverted++] = whole;
+		}
+	} else if (m->mode == CG_MAGNIFIER_OFF) {
+		draw_scaled(pass, tex, 0, 0, W, H, &whole, false);
 	} else {
 		draw_scaled(pass, tex, 0, 0, W, H, &whole, false);
 
@@ -638,16 +754,62 @@ magnifier_render_output(struct cg_output *output)
 				draw_border(pass, &view, (int) fmax(1, lround(2 * scale)));
 			}
 		}
-		inverted = view;
+		if (m->invert && !wlr_box_empty(&view)) {
+			inverted[n_inverted++] = view;
+		}
+	}
+
+	/* magnifier controls (MagSetWindowSource): over everything else, each
+	 * through the parts of its client area nothing covers */
+	struct cg_mag_window *mw;
+	wl_list_for_each (mw, &m->windows, link) {
+		double ddx = (mw->dst.x - gx) * scale, ddy = (mw->dst.y - gy) * scale;
+		double ddw = mw->dst.width * scale, ddh = mw->dst.height * scale;
+		double fx = mw->sw / ddw, fy = mw->sh / ddh; /* source pixels per output pixel */
+		for (int i = 0; i < mw->n_clip; i++) {
+			const struct wlr_box *c = &mw->clip[i];
+#ifdef SG_MUTANT_MAGNIFY_NO_CLIP
+			c = &mw->dst;
+#endif
+			struct wlr_box piece = {(int) lround((c->x - gx) * scale), (int) lround((c->y - gy) * scale),
+						(int) lround(c->width * scale), (int) lround(c->height * scale)};
+			if (!wlr_box_intersection(&piece, &piece, &whole)) {
+				continue;
+			}
+			double psx = (mw->sx - gx) * scale + (piece.x - ddx) * fx * scale;
+			double psy = (mw->sy - gy) * scale + (piece.y - ddy) * fy * scale;
+			double psw = piece.width * fx * scale, psh = piece.height * fy * scale;
+			/* what of it is off this output's picture is not drawn here */
+			if (psx < 0 || psy < 0 || psx + psw > W + 0.01 || psy + psh > H + 0.01) {
+				double cx0 = fmax(psx, 0), cy0 = fmax(psy, 0), cx1 = fmin(psx + psw, W), cy1 = fmin(psy + psh, H);
+				if (cx1 <= cx0 || cy1 <= cy0) {
+					continue;
+				}
+				struct wlr_box sub = {piece.x + (int) lround((cx0 - psx) / (fx * scale)),
+						      piece.y + (int) lround((cy0 - psy) / (fy * scale)),
+						      (int) lround((cx1 - cx0) / (fx * scale)), (int) lround((cy1 - cy0) / (fy * scale))};
+				piece = sub;
+				psx = cx0;
+				psy = cy0;
+				psw = cx1 - cx0;
+				psh = cy1 - cy0;
+				if (wlr_box_empty(&piece)) {
+					continue;
+				}
+			}
+			draw_scaled(pass, tex, psx, psy, psw, psh, &piece, m->smooth);
+			if (mw->invert && n_inverted < (int) (sizeof(inverted) / sizeof(inverted[0]))) {
+				inverted[n_inverted++] = piece;
+			}
+		}
 	}
 
 	bool ok = wlr_render_pass_submit(pass);
 #ifdef SG_MUTANT_MAGNIFY_NO_INVERT
-	ok = ok || inverted.width < 0; /* the colours left as they are */
-	if (0)
+	n_inverted = 0; /* the colours left as they are */
 #endif
-	if (ok && m->invert) {
-		invert_rect(server->renderer, dst, &inverted);
+	for (int i = 0; ok && i < n_inverted; i++) {
+		invert_rect(server->renderer, dst, &inverted[i]);
 	}
 
 	wlr_texture_destroy(tex);

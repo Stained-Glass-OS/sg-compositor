@@ -31,12 +31,30 @@ struct cg_magnifier {
 	bool centre_given;      /* dock: what it shows is round this point, not the pointer */
 	double centre_x, centre_y;
 
-	/* the one controlling connection (MAGNIFY on the control socket):
-	 * magnification lasts as long as it does */
-	int fd;
-	struct wl_event_source *source;
-	char line[256];
-	size_t len;
+	/* MAGNIFY connections on the control socket (struct cg_mag_conn): the
+	 * screen's view (full, lens, dock) is the last one's to set it and lasts
+	 * as long as it does; window views (magnifier controls, MagSetWindowSource)
+	 * belong to the connection that made them and go with it */
+	struct wl_list conns;
+	int n_conns;
+	struct cg_mag_conn *owner;
+	struct wl_list windows; /* struct cg_mag_window */
+};
+
+#define CG_MAG_WINDOW_CLIPS 16
+
+/* a magnifier control's view: what of the screen (src, the Wine desktop's
+ * coordinates) is shown in its client area (dst), seen through the parts of
+ * it no other window covers (clip) */
+struct cg_mag_window {
+	struct cg_mag_conn *conn;
+	unsigned int id;
+	double sx, sy, sw, sh;
+	struct wlr_box dst;
+	bool invert;
+	int n_clip;
+	struct wlr_box clip[CG_MAG_WINDOW_CLIPS];
+	struct wl_list link;
 };
 
 void magnifier_init(struct cg_server *server);
