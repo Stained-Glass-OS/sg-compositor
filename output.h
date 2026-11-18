@@ -21,6 +21,10 @@ struct cg_output {
 	 * not by configuration -- the next input turns it back on. */
 	bool powered_off;
 
+	/* sg-compositor: a few seconds after the output comes on (woken, or a
+	 * monitor that returned), its mode is set once more (output_relink) */
+	struct wl_event_source *relink_timer;
+
 	/* sg-compositor: Magnifier (magnifier.c): the scene is drawn into these
 	 * and put on the screen scaled */
 	struct wlr_swapchain *mag_swapchain;

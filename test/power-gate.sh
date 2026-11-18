@@ -7,7 +7,9 @@
 # notifications (ext-idle-notify, swayidle), and honour idle inhibitors.
 #
 #   1. an ordinary client is offered output power management
-#   2. wlopm turns the output off (and nothing can be captured from it) and on
+#   2. wlopm turns the output off (and nothing can be captured from it) and on;
+#      a second later its mode is set once more (a link trained while the
+#      monitor was still waking can be bad); mutant SG_MUTANT_NO_RELINK
 #   3. XWayland's screen keeps its size across off/on (Wine's desktop)
 #   4. input turns an off screen back on
 #   5. swayidle's timeout fires when idle, its resume on input
@@ -44,7 +46,7 @@ wayland-scanner private-code "$P" "$T/idle-inhibit-protocol.c" &&
 cc -o "$T/inhibitor" -I"$T" "$HERE/test/idle-inhibitor.c" "$T/idle-inhibit-protocol.c" \
     $(pkg-config --cflags --libs wayland-client) || { echo "SKIP: cannot build the inhibitor"; exit 77; }
 
-WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 WLR_RENDERER=pixman \
+WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 WLR_RENDERER=pixman SG_COMPOSITOR_LOG=info SG_RELINK_MS=1000 \
     "$COMP" -L "$T/priv.sock" -C "$T/ctl.sock" -U "$(id -u)" -- \
     sh -c "echo \$WAYLAND_DISPLAY > $T/d; exec sleep 600" >"$T/log" 2>&1 &
 CP=$!
@@ -84,6 +86,13 @@ after=$(dims)
 WAYLAND_DISPLAY="$D" wlopm --on '*' >/dev/null 2>&1
 waitfor '[ "$(state)" = on ]' 25 && pass "wlopm --on turns it back on" || fail "after wlopm --on the output is '$(state)'"
 capture && pass "the output renders again after on" || fail "could not capture after on"
+# 3b. the link trained again once the monitor is awake (output.c output_relink;
+# mutant SG_MUTANT_NO_RELINK)
+relinks() { grep -c 'relinked at' "$T/log"; }
+r0=$(relinks)
+waitfor '[ "$(relinks)" -gt "$r0" ]' 15 && pass "a second after coming on, the output's mode is set once more (relinked)" \
+    || fail "the output was not relinked after coming on"
+[ "$(state)" = on ] && capture && pass "...and it is on and renders after the relink" || fail "after the relink the output is '$(state)'"
 [ "$(dims)" = "$before" ] && pass "XWayland's screen keeps its size after on" || fail "XWayland's screen is '$(dims)' after on"
 
 # 4.

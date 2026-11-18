@@ -250,6 +250,61 @@ is_nested_output(struct cg_output *output)
 	return false;
 }
 
+/* A monitor that wakes from standby, or comes back, is still settling when
+ * the output is turned on, and the link the GPU trains with it then can be
+ * bad: horizontal lines through the picture, as with a cable half out, at any
+ * refresh rate, until the next mode change (David's Optix AG32C on NVIDIA,
+ * 2026-11-18: every wake; any later mode change cleared it). So, as a driver
+ * retrains a link that went bad, the output's mode is set once more a few
+ * seconds later, when the monitor is awake: one short blank, then a good
+ * link. SG_RELINK_MS sets the delay (0: never); mutant SG_MUTANT_NO_RELINK. */
+#define SG_RELINK_DEFAULT_MS 3000
+
+static int
+output_relink(void *data)
+{
+	struct cg_output *output = data;
+	struct wlr_output *wlr_output = output->wlr_output;
+
+	if (!wlr_output->enabled || output->powered_off || getenv("SG_MUTANT_NO_RELINK")) {
+		return 0;
+	}
+	struct wlr_output_state state;
+	wlr_output_state_init(&state);
+	if (wlr_output->current_mode) {
+		wlr_output_state_set_mode(&state, wlr_output->current_mode);
+	} else {
+		wlr_output_state_set_custom_mode(&state, wlr_output->width, wlr_output->height, wlr_output->refresh);
+	}
+	if (wlr_output_commit_state(wlr_output, &state)) {
+		wlr_log(WLR_INFO, "Output %s relinked at %dx%d@%d mHz after coming on", wlr_output->name,
+			wlr_output->width, wlr_output->height, wlr_output->refresh);
+		wlr_output_schedule_frame(wlr_output);
+	} else {
+		wlr_log(WLR_ERROR, "Could not relink output %s", wlr_output->name);
+	}
+	wlr_output_state_finish(&state);
+	return 0;
+}
+
+static void
+output_arm_relink(struct cg_output *output)
+{
+	const char *v = getenv("SG_RELINK_MS");
+	int ms = v ? atoi(v) : SG_RELINK_DEFAULT_MS;
+
+	if (ms <= 0 || is_nested_output(output)) {
+		return;
+	}
+	if (!output->relink_timer) {
+		output->relink_timer = wl_event_loop_add_timer(wl_display_get_event_loop(output->server->wl_display),
+							       output_relink, output);
+	}
+	if (output->relink_timer) {
+		wl_event_source_timer_update(output->relink_timer, ms);
+	}
+}
+
 static void
 output_destroy(struct cg_output *output)
 {
@@ -263,6 +318,9 @@ output_destroy(struct cg_output *output)
 	wl_list_remove(&output->request_state.link);
 	wl_list_remove(&output->frame.link);
 	wl_list_remove(&output->link);
+	if (output->relink_timer) {
+		wl_event_source_remove(output->relink_timer);
+	}
 
 	output_layout_remove(output);
 	magnifier_output_destroy(output);
@@ -421,6 +479,7 @@ handle_new_output(struct wl_listener *listener, void *data)
 	wlr_log(WLR_DEBUG, "Enabling new output %s", wlr_output->name);
 	if (wlr_output_commit_state(wlr_output, &state)) {
 		output_layout_add_auto(output);
+		output_arm_relink(output); /* a monitor that came back may still be waking */
 	}
 	/* the pointer at the new screen's scale (seat.c) */
 	if (server->seat) {
@@ -463,6 +522,7 @@ output_set_power(struct cg_output *output, bool on)
 			wlr_output->width, wlr_output->height, wlr_output->refresh);
 		if (on) {
 			wlr_output_schedule_frame(wlr_output);
+			output_arm_relink(output);
 		}
 	} else {
 		wlr_log(WLR_ERROR, "Could not power %s output %s", on ? "on" : "off", wlr_output->name);
