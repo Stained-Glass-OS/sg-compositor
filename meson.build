@@ -143,6 +143,7 @@ cage_sources = [
   'backdrop.c',
   'lock.c',
   'magnifier.c',
+  'capture_border.c',
   'public_capture.c',
   'elevated.c',
   'session_x11.c',

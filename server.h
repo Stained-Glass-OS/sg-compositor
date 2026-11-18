@@ -4,6 +4,9 @@
 #include "config.h"
 #include "lock.h"
 #include "magnifier.h"
+#include "capture_border.h"
+
+struct wlr_swapchain;
 
 #include <wayland-server-core.h>
 #include <wlr/types/wlr_idle_inhibit_v1.h>
@@ -112,6 +115,13 @@ struct cg_server {
 	 * the prompt (lock.c) */
 	struct wlr_scene_rect *dim_rect;
 	struct wlr_compositor *compositor;
+	/* sg-compositor: the capture border round what Windows.Graphics.Capture
+	 * captures (capture_border.c): its frames, above every window, below the
+	 * secure layers; a swapchain to render the output without them */
+	struct wlr_scene_tree *capture_border_tree;
+	struct wl_list capture_borders;
+	int n_capture_borders;
+	struct wlr_swapchain *capture_border_swapchain;
 	/* sg-compositor: Magnifier, drawn here (magnifier.c) */
 	struct cg_magnifier magnifier;
 #if CAGE_HAS_XWAYLAND

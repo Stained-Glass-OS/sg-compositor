@@ -144,7 +144,19 @@ frame_handle_commit(struct wl_listener *listener, void *data)
 	if (!(ev->state->committed & WLR_OUTPUT_STATE_BUFFER) || !ev->state->buffer) {
 		return; /* not a new picture: wait for one */
 	}
-	if (!fill(f, ev->state->buffer)) {
+	/* a capture border in the picture: the output once more without it --
+	 * the frame is for the person, never in a capture (capture_border.c) */
+	struct wlr_buffer *without = NULL;
+#ifndef SG_MUTANT_BORDER_CAPTURED
+	if (!secure_now(f->server) && capture_border_in(f->server, f->output, &f->box)) {
+		without = capture_border_render_without(f->server, f->output);
+	}
+#endif
+	bool filled = fill(f, without ? without : ev->state->buffer);
+	if (without) {
+		wlr_buffer_unlock(without);
+	}
+	if (!filled) {
 		wlr_log(WLR_ERROR, "public capture: copying %dx%d failed", f->box.width, f->box.height);
 		frame_failed(f);
 		return;

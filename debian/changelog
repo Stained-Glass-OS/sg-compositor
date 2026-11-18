@@ -1,3 +1,26 @@
+sg-compositor (0.2.0+sg73) unstable; urgency=medium
+
+  * The capture border: the thin yellow frame Windows draws round a window or
+    monitor that Windows.Graphics.Capture is capturing (capture_border.c).
+    A program asks on the control socket -- CAPTUREBORDER, anyone in the
+    session, as INHIBIT and MAGNIFY -- then says where, a line at a time
+    (RECT x y w h in the Wine desktop's coordinates, again whenever it
+    moves; OFF), and the frame lasts as long as the connection: a program
+    that ends or stops capturing takes it with it. Drawn on the window's or
+    monitor's edge above every window, below the secure layers, and not at
+    all while the session is locked, a secure prompt is up or the security
+    screen is open. Never in a capture: when a frame would be in the
+    picture, the public screencopy renders the output once more without
+    the frames (a capture-only swapchain; the output's own damage is
+    cleared only by its commits, so the screen is unaffected). wine-sg's
+    graphicscapture (7856) asks for it on StartCapture. Gate: make
+    test-capborder (on the screen, not in a whole-screen or region
+    capture, moves, hidden under a secure prompt, OFF/RECT, gone with its
+    connection; mutants SG_MUTANT_BORDER_CAPTURED, SG_MUTANT_BORDER_STAYS).
+    test-capture, test-privileged and test-magnify pass as before.
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Wed, 18 Nov 2026 07:40:00 -0800
+
 sg-compositor (0.2.0+sg72) unstable; urgency=medium
 
   * A program's magnifier window is no longer drawn over a Linux program's

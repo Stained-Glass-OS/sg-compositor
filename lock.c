@@ -646,6 +646,18 @@ handle_control_connection(int fd, uint32_t mask, void *data)
 			magnifier_take_connection(lock->server, client_fd);
 			return 0; /* the connection stays open */
 		}
+	} else if (!strcmp(buf, "CAPTUREBORDER")) {
+		/* Anyone in the session may frame what it captures, as any
+		 * Windows program's Windows.Graphics.Capture session is framed:
+		 * it only shows a border, nothing is sent back but OK; it lasts
+		 * as long as the connection does (capture_border.c). */
+		if (!uid_may_lock(lock, uid)) {
+			reply = "ERR not permitted\n";
+		} else {
+			fcntl(client_fd, F_SETFL, fcntl(client_fd, F_GETFL) | O_NONBLOCK);
+			capture_border_take_connection(lock->server, client_fd);
+			return 0; /* the connection stays open */
+		}
 	} else if (!strcmp(buf, "IDLE")) {
 		reply = lock->server->control_inhibitors > 0 || !wl_list_empty(&lock->server->inhibitors)
 				? "OK inhibited\n" : "OK not inhibited\n";
@@ -936,6 +948,7 @@ isolate(struct cg_lock *lock, const char *event)
 	}
 	/* nothing secure is ever magnified */
 	magnifier_state_changed(server);
+	capture_border_update_visibility(server);
 }
 
 void
@@ -1001,6 +1014,7 @@ unisolate(struct cg_lock *lock, const char *event)
 		}
 	}
 	magnifier_state_changed(server);
+	capture_border_update_visibility(server);
 }
 
 void

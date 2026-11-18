@@ -383,6 +383,7 @@ main(int argc, char *argv[])
 	}
 
 	magnifier_init(&server);
+	capture_border_init(&server);
 
 	server.display_destroy.notify = handle_display_destroy;
 	wl_display_add_destroy_listener(server.wl_display, &server.display_destroy);
@@ -455,6 +456,8 @@ main(int argc, char *argv[])
 	backdrop_init(&server);
 	server.normal_tree = wlr_scene_tree_create(&server.scene->tree);
 	server.elevated_tree = wlr_scene_tree_create(&server.scene->tree);
+	/* capture borders: above every window, below the dimming and the secure layers */
+	server.capture_border_tree = wlr_scene_tree_create(&server.scene->tree);
 	server.dim_rect = wlr_scene_rect_create(&server.scene->tree, 1, 1, (float[4]) {0, 0, 0, 0.62f});
 	if (server.dim_rect) {
 		wlr_scene_node_set_enabled(&server.dim_rect->node, false);
@@ -747,6 +750,7 @@ main(int argc, char *argv[])
 	server.xwayland = NULL;
 	wlr_xcursor_manager_destroy(xcursor_manager);
 #endif
+	capture_border_fini(&server);
 	magnifier_fini(&server);
 	wl_display_destroy_clients(server.wl_display);
 

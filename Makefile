@@ -18,7 +18,7 @@ install: build
 # The gate is sg-session's own session gate, run with this compositor hosting
 # the session instead of cage. Milestone 1 of ADR 0011 is exactly "that still
 # passes", so the gate is the same one, not a new one.
-test: test-session test-lock test-secure test-secure-dim test-xwindows test-privileged test-sas test-power test-elevated test-popup test-backdrop test-xfloat test-decor test-decorlook test-decorsmooth test-capture test-wmreq test-jumpclick test-bigwindow test-desktopfront test-selfmove test-deskcomp test-bgpart test-glassframe test-animbg test-embedfocus test-pen test-touchcursor test-unmapcfg test-wlapp test-wtsevents test-sessionend test-onedisplay test-inputconf test-xfsmap test-wlfsout
+test: test-session test-lock test-secure test-secure-dim test-xwindows test-privileged test-sas test-power test-elevated test-popup test-backdrop test-xfloat test-decor test-decorlook test-decorsmooth test-capture test-capborder test-wmreq test-jumpclick test-bigwindow test-desktopfront test-selfmove test-deskcomp test-bgpart test-glassframe test-animbg test-embedfocus test-pen test-touchcursor test-unmapcfg test-wlapp test-wtsevents test-sessionend test-onedisplay test-inputconf test-xfsmap test-wlfsout
 
 test-session: build
 	@[ -d "$(SG_SESSION)" ] || { echo "sg-session checkout not found at $(SG_SESSION)"; exit 2; }
@@ -127,6 +127,11 @@ test-wmreq: build
 .PHONY: test-capture
 test-capture: build
 	@SG_COMPOSITOR_BIN=$(CURDIR)/$(BUILD)/sg-compositor sh test/capture-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc
+
+# The capture border round what Windows.Graphics.Capture captures: on the
+# screen, never in a capture, gone with its connection (capture_border.c).
+test-capborder: build
+	sh test/capborder-gate.sh
 
 .PHONY: test-decor
 test-decor: build
