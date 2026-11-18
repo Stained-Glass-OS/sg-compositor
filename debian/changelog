@@ -1,3 +1,13 @@
+sg-compositor (0.2.0+sg75) unstable; urgency=medium
+
+  * How much the compositor logs can be raised without a rebuild: "info" or
+    "debug" in /etc/stained-glass/compositor-log (root's file), or
+    SG_COMPOSITOR_LOG for a gate; errors only otherwise, as before. A
+    display problem that comes and goes leaves a record. Powering an output
+    on or off logs its mode.
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Wed, 18 Nov 2026 13:31:36 -0800
+
 sg-compositor (0.2.0+sg74) unstable; urgency=medium
 
   * A monitor that comes back keeps the mode the person set for it, from its

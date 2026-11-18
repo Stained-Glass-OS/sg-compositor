@@ -459,7 +459,8 @@ output_set_power(struct cg_output *output, bool on)
 	wlr_output_state_set_enabled(&state, on);
 	if (wlr_output_commit_state(wlr_output, &state)) {
 		output->powered_off = !on;
-		wlr_log(WLR_INFO, "Output %s powered %s", wlr_output->name, on ? "on" : "off");
+		wlr_log(WLR_INFO, "Output %s powered %s (%dx%d@%d mHz)", wlr_output->name, on ? "on" : "off",
+			wlr_output->width, wlr_output->height, wlr_output->refresh);
 		if (on) {
 			wlr_output_schedule_frame(wlr_output);
 		}

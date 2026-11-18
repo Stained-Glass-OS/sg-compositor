@@ -15,6 +15,7 @@
 #include <getopt.h>
 #include <signal.h>
 #include <stdio.h>
+#include <string.h>
 #include <stdlib.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -345,6 +346,35 @@ parse_args(struct cg_server *server, int argc, char *argv[])
 	return true;
 }
 
+/* How much the compositor logs: errors only, unless an administrator asks
+ * for more in /etc/stained-glass/compositor-log ("info" or "debug") --
+ * root's file, so a display problem that comes and goes (David's monitor,
+ * 2026-11-18) leaves a record without a rebuild. SG_COMPOSITOR_LOG in the
+ * environment does the same for a gate. */
+static enum wlr_log_importance
+sg_log_level(void)
+{
+	char buf[16] = "";
+	const char *v = getenv("SG_COMPOSITOR_LOG");
+	if (!v) {
+		FILE *f = fopen("/etc/stained-glass/compositor-log", "r");
+		if (f) {
+			if (!fgets(buf, sizeof(buf), f)) {
+				buf[0] = 0;
+			}
+			fclose(f);
+		}
+		v = buf;
+	}
+	if (!strncmp(v, "debug", 5)) {
+		return WLR_DEBUG;
+	}
+	if (!strncmp(v, "info", 4)) {
+		return WLR_INFO;
+	}
+	return WLR_ERROR;
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -360,7 +390,7 @@ main(int argc, char *argv[])
 #ifdef DEBUG
 	wlr_log_init(WLR_DEBUG, NULL);
 #else
-	wlr_log_init(WLR_ERROR, NULL);
+	wlr_log_init(sg_log_level(), NULL);
 #endif
 
 	/* Wayland requires XDG_RUNTIME_DIR to be set. */
