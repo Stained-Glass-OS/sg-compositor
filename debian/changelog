@@ -1,3 +1,22 @@
+sg-compositor (0.2.0+sg74) unstable; urgency=medium
+
+  * A monitor that comes back keeps the mode the person set for it, from its
+    first frame, as Windows keeps each monitor's mode and applies it on
+    reconnect (mode_memory.c). A monitor that powers down (DPMS, its own
+    power button) returns as a new output, and the compositor gave it its
+    fastest mode; the kept mode was only put back afterwards by the
+    session. David's MSI Optix AG32C on NVIDIA cannot hold its 165 Hz on
+    that link and flickered every morning until 144 Hz came back. Every
+    mode set through output management (Settings, sg-settingsctl, the
+    session-start restore) is now remembered per monitor -- make, model
+    and serial, the port too when there is no serial -- and a returning
+    monitor starts at it when it still offers it (refresh within 0.5 Hz),
+    else at its fastest as before. Gate: make test-modememory (mutant
+    SG_MUTANT_MODE_NO_RECALL fails it); test-onedisplay, test-capture and
+    test-power pass as before.
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Wed, 18 Nov 2026 09:23:02 -0800
+
 sg-compositor (0.2.0+sg73) unstable; urgency=medium
 
   * The capture border: the thin yellow frame Windows draws round a window or

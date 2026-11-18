@@ -38,6 +38,7 @@
 
 #include "backdrop.h"
 #include "output.h"
+#include "mode_memory.h"
 #include "syncobj.h"
 #include "seat.h"
 #include "server.h"
@@ -154,6 +155,21 @@ output_apply_config(struct cg_output *output, struct wlr_output_configuration_he
 	}
 
 	if (head->state.enabled) {
+		/* the mode the person chose, back the moment this monitor returns */
+		struct sg_mode chosen = {0};
+		if (head->state.mode) {
+			chosen = (struct sg_mode){head->state.mode->width, head->state.mode->height,
+						  head->state.mode->refresh};
+		} else if (head->state.custom_mode.width > 0) {
+			chosen = (struct sg_mode){head->state.custom_mode.width, head->state.custom_mode.height,
+						  head->state.custom_mode.refresh};
+		}
+		if (chosen.width > 0) {
+			char key[256];
+			struct wlr_output *o = output->wlr_output;
+			sg_mode_key(key, sizeof(key), o->make, o->model, o->serial, o->name);
+			sg_mode_remember(key, chosen);
+		}
 		output_layout_add(output, head->state.x, head->state.y);
 	} else {
 		output_layout_remove(output);
@@ -336,6 +352,35 @@ handle_new_output(struct wl_listener *listener, void *data)
 			if (fastest != preferred_mode) {
 				wlr_log(WLR_INFO, "Output %s: %dx%d at %d.%03d Hz, its fastest", wlr_output->name, fastest->width,
 					fastest->height, fastest->refresh / 1000, fastest->refresh % 1000);
+			}
+			/* a monitor coming back (it powered down) at the mode the person
+			 * set for it this session, from its first frame (mode_memory.h) */
+			char key[256];
+			struct sg_mode want;
+			sg_mode_key(key, sizeof(key), wlr_output->make, wlr_output->model, wlr_output->serial,
+				    wlr_output->name);
+			if (sg_mode_recall(key, &want)) {
+				struct sg_mode list[64];
+				struct wlr_output_mode *ptrs[64];
+				int n = 0;
+				wl_list_for_each (mode, &wlr_output->modes, link) {
+					if (n == 64) {
+						break;
+					}
+					list[n] = (struct sg_mode){mode->width, mode->height, mode->refresh};
+					ptrs[n++] = mode;
+				}
+				int i = sg_mode_pick(list, n, want);
+				if (i >= 0) {
+					wlr_output_state_set_mode(&state, ptrs[i]);
+					if (wlr_output_test_state(wlr_output, &state)) {
+						wlr_log(WLR_INFO, "Output %s: back at its kept %dx%d at %d.%03d Hz",
+							wlr_output->name, ptrs[i]->width, ptrs[i]->height,
+							ptrs[i]->refresh / 1000, ptrs[i]->refresh % 1000);
+					} else {
+						wlr_output_state_set_mode(&state, fastest);
+					}
+				}
 			}
 		}
 		if (!wlr_output_test_state(wlr_output, &state)) {

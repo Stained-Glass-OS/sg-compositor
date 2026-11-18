@@ -18,7 +18,7 @@ install: build
 # The gate is sg-session's own session gate, run with this compositor hosting
 # the session instead of cage. Milestone 1 of ADR 0011 is exactly "that still
 # passes", so the gate is the same one, not a new one.
-test: test-session test-lock test-secure test-secure-dim test-xwindows test-privileged test-sas test-power test-elevated test-popup test-backdrop test-xfloat test-decor test-decorlook test-decorsmooth test-capture test-capborder test-wmreq test-jumpclick test-bigwindow test-desktopfront test-selfmove test-deskcomp test-bgpart test-glassframe test-animbg test-embedfocus test-pen test-touchcursor test-unmapcfg test-wlapp test-wtsevents test-sessionend test-onedisplay test-inputconf test-xfsmap test-wlfsout
+test: test-modememory test-session test-lock test-secure test-secure-dim test-xwindows test-privileged test-sas test-power test-elevated test-popup test-backdrop test-xfloat test-decor test-decorlook test-decorsmooth test-capture test-capborder test-wmreq test-jumpclick test-bigwindow test-desktopfront test-selfmove test-deskcomp test-bgpart test-glassframe test-animbg test-embedfocus test-pen test-touchcursor test-unmapcfg test-wlapp test-wtsevents test-sessionend test-onedisplay test-inputconf test-xfsmap test-wlfsout
 
 test-session: build
 	@[ -d "$(SG_SESSION)" ] || { echo "sg-session checkout not found at $(SG_SESSION)"; exit 2; }
@@ -132,6 +132,12 @@ test-capture: build
 # screen, never in a capture, gone with its connection (capture_border.c).
 test-capborder: build
 	sh test/capborder-gate.sh
+
+# A monitor that comes back (it powered down) at the mode the person set,
+# not its fastest (mode_memory.c). Mutant: SG_MUTANT_MODE_NO_RECALL.
+.PHONY: test-modememory
+test-modememory:
+	@mkdir -p $(BUILD) && cc -Wall -Werror -o $(BUILD)/modememory-test test/modememory-test.c mode_memory.c && $(BUILD)/modememory-test
 
 .PHONY: test-decor
 test-decor: build
