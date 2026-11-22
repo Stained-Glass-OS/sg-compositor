@@ -1,3 +1,15 @@
+sg-compositor (0.2.0+sg78) unstable; urgency=medium
+
+  * Tests: test-touchcursor passes again. The pointer did hide on a touch;
+    the gate counted every pixel that was not the background, and on a
+    machine with sg-session installed the compositor shows its welcome
+    splash until a desktop maps, so the splash's 8463 pixels read as "the
+    pointer still shows". The gate now starts the compositor with no
+    backdrop picture (SG_BACKDROP names a missing file). Mutant
+    SG_MUTANT_TOUCH_KEEPS_CURSOR still fails it.
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Sun, 22 Nov 2026 14:37:15 -0800
+
 sg-compositor (0.2.0+sg77) unstable; urgency=medium
 
   * The relink after a monitor comes on (at start-up, after standby, or when

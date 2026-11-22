@@ -27,10 +27,14 @@ mkfifo "$T/pen"
 
 # start CHILD [ENV=VALUE...]: a compositor hosting CHILD (which writes $T/d
 # when it starts); stop: end it
+# The screen must be empty: on a machine with sg-session installed the compositor shows its welcome
+# splash (/usr/share/stained-glass/backdrop.sgbd) until a desktop maps, and the splash's pixels counted as
+# the pointer -- "after a touch 8463 pixels are not the background" with the pointer hidden (sg77).
+# SG_BACKDROP names a file that is not there: the plain colour.
 start() {
     child=$1; shift
     rm -f "$T/d"
-    env "$@" WAYLAND_DEBUG=server SG_TEST_TABLET_FIFO="$T/pen" WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 \
+    env "$@" SG_BACKDROP="$T/no-backdrop" WAYLAND_DEBUG=server SG_TEST_TABLET_FIFO="$T/pen" WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 \
         WLR_RENDERER=pixman "$COMP" -L "$T/priv.sock" -C "$T/ctl.sock" -U "$(id -u)" -- \
         sh -c "$child & echo up > $T/d; exec sleep 600" >"$T/log" 2>&1 &
     CP=$!
