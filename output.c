@@ -17,6 +17,7 @@
 #include <unistd.h>
 #include <wayland-server-core.h>
 #include <wlr/backend.h>
+#include <wlr/backend/drm.h>
 #include <wlr/backend/wayland.h>
 #include <wlr/config.h>
 #if WLR_HAS_X11_BACKEND
@@ -269,16 +270,36 @@ output_relink(void *data)
 	if (!wlr_output->enabled || output->powered_off || getenv("SG_MUTANT_NO_RELINK")) {
 		return 0;
 	}
+	/* Setting the same mode again does not retrain the link: the kernel sees
+	 * no mode change and keeps the bad link (2026-11-22: the sign-in screen
+	 * stayed striped after a "relink" at boot; only a different refresh rate
+	 * cleared it). Turning the output off and on again does retrain it, and
+	 * the scene repaints the whole screen when it comes back. Mutant
+	 * SG_MUTANT_RELINK_SAME_MODE: the same-mode commit that did nothing. */
+	struct wlr_output_mode *mode = wlr_output->current_mode;
+	int w = wlr_output->width, h = wlr_output->height, refresh = wlr_output->refresh;
+	bool cycle = !getenv("SG_MUTANT_RELINK_SAME_MODE");
 	struct wlr_output_state state;
+	if (cycle) {
+		wlr_output_state_init(&state);
+		wlr_output_state_set_enabled(&state, false);
+		if (!wlr_output_commit_state(wlr_output, &state)) {
+			wlr_log(WLR_ERROR, "Could not turn output %s off to relink it", wlr_output->name);
+			wlr_output_state_finish(&state);
+			return 0;
+		}
+		wlr_output_state_finish(&state);
+	}
 	wlr_output_state_init(&state);
-	if (wlr_output->current_mode) {
-		wlr_output_state_set_mode(&state, wlr_output->current_mode);
+	wlr_output_state_set_enabled(&state, true);
+	if (mode) {
+		wlr_output_state_set_mode(&state, mode);
 	} else {
-		wlr_output_state_set_custom_mode(&state, wlr_output->width, wlr_output->height, wlr_output->refresh);
+		wlr_output_state_set_custom_mode(&state, w, h, refresh);
 	}
 	if (wlr_output_commit_state(wlr_output, &state)) {
-		wlr_log(WLR_INFO, "Output %s relinked at %dx%d@%d mHz after coming on", wlr_output->name,
-			wlr_output->width, wlr_output->height, wlr_output->refresh);
+		wlr_log(WLR_INFO, "Output %s relinked at %dx%d@%d mHz after coming on%s", wlr_output->name,
+			wlr_output->width, wlr_output->height, wlr_output->refresh, cycle ? " (off and on)" : "");
 		wlr_output_schedule_frame(wlr_output);
 	} else {
 		wlr_log(WLR_ERROR, "Could not relink output %s", wlr_output->name);
@@ -292,6 +313,13 @@ output_arm_relink(struct cg_output *output)
 {
 	const char *v = getenv("SG_RELINK_MS");
 	int ms = v ? atoi(v) : SG_RELINK_DEFAULT_MS;
+
+	/* Only a real monitor's link can go bad; a virtual output (headless, a
+	 * remote session's) is left alone unless SG_RELINK_MS asks (the power
+	 * gate): its brief off and on would only drop a click or a capture. */
+	if (!v && !wlr_output_is_drm(output->wlr_output)) {
+		return;
+	}
 
 	if (ms <= 0 || is_nested_output(output)) {
 		return;

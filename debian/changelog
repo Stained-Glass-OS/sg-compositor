@@ -1,3 +1,17 @@
+sg-compositor (0.2.0+sg77) unstable; urgency=medium
+
+  * The relink after a monitor comes on (at start-up, after standby, or when
+    it comes back) now turns the output off and on again instead of setting
+    the same mode once more. The kernel saw no change in the same mode, so
+    the bad link stayed: the sign-in screen stayed striped after a reboot
+    until the refresh rate was changed by hand (David's Optix AG32C on
+    NVIDIA, 2026-11-22). Coming back on retrains the link and repaints the
+    whole screen. Only a real monitor is relinked (DRM outputs); a virtual
+    one is left alone unless SG_RELINK_MS asks, so its blink cannot drop a
+    click or a capture. Gate test-power; mutant SG_MUTANT_RELINK_SAME_MODE.
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Sun, 22 Nov 2026 09:09:19 -0800
+
 sg-compositor (0.2.0+sg76) unstable; urgency=medium
 
   * A monitor that wakes from standby, or comes back, gets its mode set once

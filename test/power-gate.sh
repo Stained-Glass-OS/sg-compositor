@@ -92,6 +92,9 @@ relinks() { grep -c 'relinked at' "$T/log"; }
 r0=$(relinks)
 waitfor '[ "$(relinks)" -gt "$r0" ]' 15 && pass "a second after coming on, the output's mode is set once more (relinked)" \
     || fail "the output was not relinked after coming on"
+# the same mode set again retrains nothing; the relink turns the output off and on (mutant SG_MUTANT_RELINK_SAME_MODE)
+grep 'relinked at' "$T/log" | tail -1 | grep -q '(off and on)' && pass "...by turning it off and on, which retrains the link" \
+    || fail "the relink only set the same mode again (no retrain): $(grep 'relinked at' "$T/log" | tail -1)"
 [ "$(state)" = on ] && capture && pass "...and it is on and renders after the relink" || fail "after the relink the output is '$(state)'"
 [ "$(dims)" = "$before" ] && pass "XWayland's screen keeps its size after on" || fail "XWayland's screen is '$(dims)' after on"
 
