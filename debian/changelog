@@ -1,3 +1,14 @@
+sg-compositor (0.2.0+sg79) unstable; urgency=medium
+
+  * A compositor never takes over the lock and control sockets of one that is
+    still running: before it removes an existing socket it checks whether
+    anyone answers on it, and refuses to start if so (only a stale socket is
+    replaced). A test compositor started with the live session's paths had
+    removed them, and David's locked desktop could never be unlocked again
+    (2026-11-22). Gate test-socketguard; mutant SG_MUTANT_STEAL_SOCKET.
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Sun, 22 Nov 2026 18:20:12 -0800
+
 sg-compositor (0.2.0+sg78) unstable; urgency=medium
 
   * Tests: test-touchcursor passes again. The pointer did hide on a touch;

@@ -203,6 +203,23 @@ listen_on(const char *path)
 		return -1;
 	}
 	strcpy(addr.sun_path, path);
+	/* A socket someone still answers on belongs to a running compositor:
+	 * never take it over. Unlinking it would leave that session's lock screen
+	 * unable to reach its compositor -- unlockable never again (2026-11-22: a
+	 * test compositor started with the live session's paths replaced David's
+	 * sockets, and his locked desktop could not be unlocked). Only a stale
+	 * socket (nobody listening) is removed. Mutant SG_MUTANT_STEAL_SOCKET. */
+	if (!getenv("SG_MUTANT_STEAL_SOCKET")) {
+		int probe = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+		if (probe >= 0) {
+			int alive = connect(probe, (struct sockaddr *) &addr, sizeof(addr)) == 0;
+			close(probe);
+			if (alive) {
+				wlr_log(WLR_ERROR, "%s is in use by a running compositor; not taking it over", path);
+				return -1;
+			}
+		}
+	}
 	unlink(path);
 	if ((fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0)) < 0) {
 		return -1;

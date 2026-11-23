@@ -18,7 +18,7 @@ install: build
 # The gate is sg-session's own session gate, run with this compositor hosting
 # the session instead of cage. Milestone 1 of ADR 0011 is exactly "that still
 # passes", so the gate is the same one, not a new one.
-test: test-modememory test-session test-lock test-secure test-secure-dim test-xwindows test-privileged test-sas test-power test-elevated test-popup test-backdrop test-xfloat test-decor test-decorlook test-decorsmooth test-capture test-capborder test-wmreq test-jumpclick test-bigwindow test-desktopfront test-selfmove test-deskcomp test-bgpart test-glassframe test-animbg test-embedfocus test-pen test-touchcursor test-unmapcfg test-wlapp test-wtsevents test-sessionend test-onedisplay test-inputconf test-xfsmap test-wlfsout
+test: test-modememory test-socketguard test-session test-lock test-secure test-secure-dim test-xwindows test-privileged test-sas test-power test-elevated test-popup test-backdrop test-xfloat test-decor test-decorlook test-decorsmooth test-capture test-capborder test-wmreq test-jumpclick test-bigwindow test-desktopfront test-selfmove test-deskcomp test-bgpart test-glassframe test-animbg test-embedfocus test-pen test-touchcursor test-unmapcfg test-wlapp test-wtsevents test-sessionend test-onedisplay test-inputconf test-xfsmap test-wlfsout
 
 test-session: build
 	@[ -d "$(SG_SESSION)" ] || { echo "sg-session checkout not found at $(SG_SESSION)"; exit 2; }
@@ -79,6 +79,14 @@ test-sas: build
 # Display power and idle (wlopm, swayidle): Settings' "Turn off the screen after".
 test-power: build
 	@sh test/power-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc
+
+# A compositor never takes over the lock/control sockets of a running one (a
+# test compositor once left a live session unlockable); mutant
+# SG_MUTANT_STEAL_SOCKET must fail.
+.PHONY: test-socketguard
+test-socketguard: build
+	@sh test/socketguard-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc
+	@if SG_MUTANT_STEAL_SOCKET=1 sh test/socketguard-gate.sh >/dev/null 2>&1; then echo "socketguard: the mutant was not caught"; exit 1; fi
 
 # Session state for the session's programs (SESSION, Wine's
 # WTSRegisterSessionNotification).
