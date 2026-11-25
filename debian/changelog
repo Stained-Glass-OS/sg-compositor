@@ -1,3 +1,22 @@
+sg-compositor (0.2.0+sg81) unstable; urgency=medium
+
+  * Several displays: the session's desktop covers every display again.
+    Wine keeps its desktop window full screen, and since full screen was
+    made one display (0.2.0+sg64's "maximized and full screen
+    fill one display") the desktop was cut to the display under its middle:
+    the other display showed only the backdrop, and with a 1080p display
+    put to the left of a 1440p main one in Display settings the whole
+    picture shifted -- the left display's part drawn on the main display,
+    the desktop stopping 2560 pixels in -- until the monitors went off and
+    on again. The desktop is now full screen over all displays, as Windows'
+    desktop is, and follows at once when they are rearranged, turned or
+    change mode; other programs' full screen windows still fill one
+    display. GitHub #12. Gate test-shelldesk (2560x1440 + 1920x1080, the
+    second beside, then left of, then below the main one; run in a QA VM);
+    mutant SG_MUTANT_SHELL_DESKTOP_ONE_DISPLAY.
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Wed, 25 Nov 2026 11:45:52 -0800
+
 sg-compositor (0.2.0+sg80) unstable; urgency=medium
 
   * The Basic Display Adapter: with no GPU driver (no DRM device: nomodeset,

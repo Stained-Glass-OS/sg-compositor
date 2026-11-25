@@ -46,6 +46,19 @@ xwayland_view_is_shell_desktop(struct cg_view *view)
 	       !strcmp(xs->class, "explorer.exe") && xs->title && strstr(xs->title, " Desktop");
 }
 
+/* the session's desktop, full screen, made the size of BOX (every display) */
+void
+xwayland_view_fill_layout(struct cg_view *view, const struct wlr_box *box)
+{
+	struct wlr_xwayland_surface *xs = xwayland_view_from_view(view)->xwayland_surface;
+	if (!xs || !xs->fullscreen || wlr_box_empty(box)) {
+		return;
+	}
+	if (xs->x != box->x || xs->y != box->y || xs->width != box->width || xs->height != box->height) {
+		wlr_xwayland_surface_configure(xs, box->x, box->y, box->width, box->height);
+	}
+}
+
 /* where and how big the X window itself is (what the program asked for) */
 bool
 xwayland_view_x_box(struct cg_view *view, struct wlr_box *box)
@@ -159,7 +172,18 @@ set_x_fullscreen(struct cg_xwayland_view *xwayland_view, bool on)
 	if (on && view->wlr_surface) {
 		struct wlr_box box;
 		view->fs_restore = (struct wlr_box){view->lx, view->ly, xwayland_surface->width, xwayland_surface->height};
-		view_get_output_box(view, &box);
+#ifndef SG_MUTANT_SHELL_DESKTOP_ONE_DISPLAY
+		/* ... except the session's desktop (Wine's, explorer's), which Wine
+		 * keeps full screen: it is every display, as Windows' desktop is.
+		 * Cut to the display under its middle, it covered the main display
+		 * only and the others showed nothing; with a display moved to the
+		 * left of the main one, the desktop drew the left one's part on the
+		 * main display and stopped there (GitHub #12) */
+		if (xwayland_view_is_shell_desktop(view)) {
+			view_get_layout_box(view, &box);
+		} else
+#endif
+			view_get_output_box(view, &box);
 		view->lx = box.x;
 		view->ly = box.y;
 		if (view->scene_tree) {

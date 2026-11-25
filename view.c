@@ -204,6 +204,13 @@ view_position(struct cg_view *view)
 		if (view->scene_tree) {
 			wlr_scene_node_set_position(&view->scene_tree->node, view->lx, view->ly);
 		}
+		/* full screen (as Wine keeps it): every display, at once when they
+		 * are rearranged, turned or change mode -- left at the old size,
+		 * the desktop ran past a display moved left of the main one, or
+		 * stopped short of it (GitHub #12) */
+#ifndef SG_MUTANT_SHELL_DESKTOP_ONE_DISPLAY
+		xwayland_view_fill_layout(view, &layout_box);
+#endif
 		return;
 	}
 	/* where the user put it with its title bar stays (the compositor does
