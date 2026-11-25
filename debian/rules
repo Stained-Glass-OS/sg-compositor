@@ -4,3 +4,8 @@
 
 override_dh_auto_configure:
 	dh_auto_configure -- -Dman-pages=disabled
+
+override_dh_installsystemd:
+	# a running session draws through it: an upgrade leaves it running (the
+	# compositor connects again if it ever restarts)
+	dh_installsystemd --name=sg-basic-display --no-stop-on-upgrade --no-restart-after-upgrade

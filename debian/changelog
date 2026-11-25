@@ -1,3 +1,24 @@
+sg-compositor (0.2.0+sg80) unstable; urgency=medium
+
+  * The Basic Display Adapter: with no GPU driver (no DRM device: nomodeset,
+    an NVIDIA card without its driver or firmware, a GPU newer than the
+    kernel) the login screen and the session no longer stay black. Debian's
+    kernel has no simpledrm, only efifb/vesafb, which wlroots cannot drive:
+    the compositor now runs on a headless backend with software (pixman)
+    rendering and its frames go to the firmware's framebuffer through
+    sg-basic-displayd (root, socket-activated: sg-basic-display.socket),
+    which draws only for the active session on seat0 -- no session ever
+    holds the framebuffer, so none can read another's screen after a
+    console switch. Input, VT switching and the redraw on the way back work
+    as with a GPU; an upgrade leaves the daemon running, and a compositor
+    whose daemon restarted connects again. A GPU the kernel drives but
+    nothing can render on now
+    falls back to software rendering too. User report 2026-11-25 (black
+    screen after the boot logo on an NVIDIA laptop). Gate: sg-image
+    basic-display-test (QEMU, ramfb: a firmware framebuffer and no DRM).
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Tue, 24 Nov 2026 19:40:00 -0800
+
 sg-compositor (0.2.0+sg79) unstable; urgency=medium
 
   * A compositor never takes over the lock and control sockets of one that is

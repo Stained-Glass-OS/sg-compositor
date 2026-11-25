@@ -1,0 +1,20 @@
+[Unit]
+Description=Basic Display Adapter (software display on the firmware framebuffer)
+Documentation=https://github.com/Stained-Glass-OS/sg-compositor
+Requires=sg-basic-display.socket
+
+[Service]
+ExecStart=/usr/libexec/stained-glass/sg-basic-displayd
+NoNewPrivileges=yes
+PrivateNetwork=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native

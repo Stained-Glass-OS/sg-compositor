@@ -60,6 +60,7 @@
 #include "elevated.h"
 #include "idle_inhibit_v1.h"
 #include "backdrop.h"
+#include "basicdisplay.h"
 #include "output.h"
 #include "public_capture.h"
 #include "seat.h"
@@ -422,7 +423,17 @@ main(int argc, char *argv[])
 	struct wl_event_source *sigint_source = wl_event_loop_add_signal(event_loop, SIGINT, handle_signal, &server);
 	struct wl_event_source *sigterm_source = wl_event_loop_add_signal(event_loop, SIGTERM, handle_signal, &server);
 
-	server.backend = wlr_backend_autocreate(event_loop, &server.session);
+	/* sg-compositor: with no GPU driver (no DRM device), the Basic Display
+	 * Adapter (basicdisplay.c): software rendering on the firmware's
+	 * framebuffer, never a black screen. */
+	const char *basic = getenv("SG_BASIC_DISPLAY");
+	if (!basic || strcmp(basic, "1") != 0) {
+		server.backend = wlr_backend_autocreate(event_loop, &server.session);
+	}
+	if (!server.backend && !(basic && strcmp(basic, "0") == 0)) {
+		wlr_log(WLR_ERROR, "No GPU can be used: trying the Basic Display Adapter");
+		basic_display_create(&server, event_loop);
+	}
 	if (!server.backend) {
 		wlr_log(WLR_ERROR, "Unable to create the wlroots backend");
 		ret = 1;
@@ -446,6 +457,14 @@ main(int argc, char *argv[])
 	}
 
 	server.renderer = wlr_renderer_autocreate(server.backend);
+	if (!server.renderer && !getenv("WLR_RENDERER")) {
+		/* sg-compositor: a GPU the kernel drives but nothing can render on
+		 * (its GL driver missing or broken): render in software, scan out
+		 * through the same GPU */
+		wlr_log(WLR_ERROR, "The GPU cannot render: rendering in software (pixman)");
+		setenv("WLR_RENDERER", "pixman", 1);
+		server.renderer = wlr_renderer_autocreate(server.backend);
+	}
 	if (!server.renderer) {
 		wlr_log(WLR_ERROR, "Unable to create the wlroots renderer");
 		ret = 1;
@@ -754,6 +773,7 @@ main(int argc, char *argv[])
 		ret = 1;
 		goto end;
 	}
+	basic_display_start(&server);
 
 	if (setenv("WAYLAND_DISPLAY", socket, true) < 0) {
 		wlr_log_errno(WLR_ERROR, "Unable to set WAYLAND_DISPLAY. Clients may not be able to connect");

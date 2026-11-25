@@ -1,0 +1,12 @@
+# The Basic Display Adapter: with no GPU driver, sg-compositor draws in
+# software and sg-basic-displayd (root) puts its frames on the firmware's
+# framebuffer -- for the active session on seat0 only.
+[Unit]
+Description=Basic Display Adapter socket (software display on the firmware framebuffer)
+
+[Socket]
+ListenSequentialPacket=/run/sg-basic-display.sock
+SocketMode=0666
+
+[Install]
+WantedBy=sockets.target

@@ -306,6 +306,21 @@ Privileged clients (lock screen, consent prompt) keep the full-screen window.
 (`wm_capabilities`) without checking the client's version -- wlroots asserts,
 and the first build took the session down the moment Claude mapped.
 
+## The Basic Display Adapter (`basicdisplay.c`, `sg-basic-displayd.c`)
+
+With no GPU driver there is no DRM device (Debian's kernel has no simpledrm,
+only efifb/vesafb) and `wlr_backend_autocreate` fails. Then the compositor
+runs on libinput + a headless backend with the pixman renderer (direct
+scanout off) and copies each frame's damage into a sealed memfd shared with
+`sg-basic-displayd` (root, `sg-basic-display.socket`, SOCK_SEQPACKET,
+`basicdisplay_proto.h`), which puts it on `/dev/fb0` only while the client's
+logind session is the active one on seat0. The compositor never opens the
+framebuffer: logind refuses TakeDevice for fbdev, and an fbdev fd has no
+revoke, so a uaccess ACL would let a user keep reading the screen after a
+switch to another user. `SG_BASIC_DISPLAY=1` forces it, `=0` forbids it.
+Gate: sg-image `test/basic-display-test.sh` (QEMU, OVMF + ramfb: efifb and
+no DRM driver) -- compositor tests never run on the host.
+
 ## Things that will bite you
 
 - **cage does not exit on SIGTERM while its child is stuck.** It stops its

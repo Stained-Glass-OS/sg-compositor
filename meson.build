@@ -141,6 +141,7 @@ endif
 
 cage_sources = [
   'backdrop.c',
+  'basicdisplay.c',
   'lock.c',
   'magnifier.c',
   'capture_border.c',
@@ -160,6 +161,8 @@ cage_sources = [
 
 cage_headers = [
   'backdrop.h',
+  'basicdisplay.h',
+  'basicdisplay_proto.h',
   configure_file(input: 'config.h.in',
                  output: 'config.h',
                  configuration: conf_data),
@@ -200,6 +203,16 @@ executable(
     math,
   ],
   install: true,
+)
+
+# sg-basic-displayd: the Basic Display Adapter's framebuffer owner (root,
+# socket-activated): a compositor with no GPU driver draws through it.
+executable(
+  'sg-basic-displayd',
+  'sg-basic-displayd.c',
+  dependencies: [dependency('libsystemd')],
+  install: true,
+  install_dir: get_option('libexecdir') / 'stained-glass',
 )
 
 # sg-deskcomp: the Wine desktop's own compositing manager (an X client --
