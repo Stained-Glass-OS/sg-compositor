@@ -99,6 +99,15 @@ struct cg_keyboard_group {
 	struct wl_client *owner;
 };
 
+/* sg-compositor: a keyboard device (seat->keyboards), for the session's
+ * keymap and layout changes (KEYMAP, LAYOUT) */
+struct cg_keyboard {
+	struct wl_list link; // cg_seat::keyboards
+	struct wlr_keyboard *keyboard;
+	bool is_virtual;
+	struct wl_listener destroy;
+};
+
 struct cg_pointer {
 	struct wl_list link; // seat::pointers
 	struct cg_seat *seat;
@@ -167,5 +176,16 @@ void seat_update_cursor_size(struct cg_seat *seat, bool force);
 /* the recommended display scale for a WxH screen, in percent: the shorter
  * side over 1080 in 25% steps, 100% to 400% (sg-shell's scale_for_screen) */
 int scale_for_screen(int w, int h);
+/* The session's keyboard layouts (Settings > Time & Language > Language,
+ * KEYMAP on the control socket): every keyboard's keymap is made again from
+ * XKB layouts, variants and options (NULL: the variant or options none),
+ * and the layout typing now stays the one it was if the new keymap has it.
+ * False if no keymap can be made of them. */
+bool seat_set_keymap(struct cg_seat *seat, const char *layout, const char *variant, const char *options);
+/* the session's layout typing now becomes number index (a program's
+ * ActivateKeyboardLayout, LAYOUT): false past the last */
+bool seat_lock_layout(struct cg_seat *seat, unsigned index);
+/* "group=N count=N layout=... variant=... options=..." */
+void seat_keyboard_status(struct cg_seat *seat, char *out, size_t len);
 
 #endif

@@ -1,3 +1,22 @@
+sg-compositor (0.2.0+sg82) unstable; urgency=medium
+
+  * The session's keyboard layouts can change without signing out, and a
+    Windows program can switch them, as on Windows. Three commands on the
+    control socket, for anyone in the session: KEYBOARD says the layouts
+    and the one typing now; KEYMAP layouts variants options gives every
+    hardware keyboard a new keymap at once (Settings > Time & Language >
+    Language, through sg-session's sg-settingsctl), keeping the layout
+    typing now if the new keymap has it; LAYOUT n makes layout n type now
+    (wine-sg's ActivateKeyboardLayout from the foreground program). LAYOUT
+    sets each keyboard device's own state as well as its group's, or the
+    next Shift undid it. Both are refused during a lock, a secure prompt or
+    the security screen. New keyboards get the session's keymap. The test
+    build's FIFO has a keyboard too (kplug, key CODE 1|0). Gate: make
+    test-keymap (test/keymap-gate.sh, 20 checks; the previous build fails
+    20), mutants LAYOUT_GROUP_ONLY and KEYMAP_FIRST_LAYOUT.
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Wed, 25 Nov 2026 12:06:44 -0800
+
 sg-compositor (0.2.0+sg81) unstable; urgency=medium
 
   * Several displays: the session's desktop covers every display again.

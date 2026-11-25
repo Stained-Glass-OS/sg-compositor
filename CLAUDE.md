@@ -321,6 +321,35 @@ switch to another user. `SG_BASIC_DISPLAY=1` forces it, `=0` forbids it.
 Gate: sg-image `test/basic-display-test.sh` (QEMU, OVMF + ramfb: efifb and
 no DRM driver) -- compositor tests never run on the host.
 
+## The session's keyboard layouts (`seat.c`, `make test-keymap`)
+
+The keymap is the session's: sg-session exports `XKB_DEFAULT_*` from the
+user's own `~/.config/stained-glass/keyboard` (Settings > Time & Language >
+Language, through sg-settingsctl) or the machine's `/etc/default/keyboard`,
+and every keyboard gets it. On the control socket, anyone in the session:
+
+- `KEYBOARD` -> `OK group=N count=N layout=... variant=... options=...`: the
+  layouts and the one typing now (Settings' "Typing now").
+- `KEYMAP layouts variants|- options|-` (XKB's characters only, at most four
+  layouts): a new keymap for every hardware keyboard and its group, at once
+  -- Windows adds a keyboard without signing out. The layout typing now
+  stays the one it was if the new keymap has it (by its name; mutant
+  `KEYMAP_FIRST_LAYOUT`). New keyboards get it too. A virtual keyboard keeps
+  its client's keymap.
+- `LAYOUT n`: that layout types now -- a Windows program's
+  `ActivateKeyboardLayout` in the foreground (wine-sg 9156/9158), as Windows'
+  input method is the person's. Set on each **device's** state as well as
+  the group's: the group takes its devices' state back at their next
+  modifier change, so a Shift undid it (mutant `LAYOUT_GROUP_ONLY`).
+- Both are refused (`ERR locked`) during a lock, a secure prompt or the
+  security screen.
+
+Xwayland follows (wl_keyboard keymap and modifiers' group), so X programs
+see the groups and their names. The gate uses the test build's keyboard
+(`-Dtest-tablet=true`: `kplug`, `key CODE 1|0` on the test FIFO) and an X
+probe (`test/keymap-probe.c`). The lazy Xwayland takes the first free X
+display: on a shared host run it in a private mount namespace.
+
 ## Things that will bite you
 
 - **cage does not exit on SIGTERM while its child is stuck.** It stops its

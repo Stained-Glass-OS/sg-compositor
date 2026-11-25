@@ -18,7 +18,7 @@ install: build
 # The gate is sg-session's own session gate, run with this compositor hosting
 # the session instead of cage. Milestone 1 of ADR 0011 is exactly "that still
 # passes", so the gate is the same one, not a new one.
-test: test-modememory test-socketguard test-session test-lock test-secure test-secure-dim test-xwindows test-privileged test-sas test-power test-elevated test-popup test-backdrop test-xfloat test-decor test-decorlook test-decorsmooth test-capture test-capborder test-wmreq test-jumpclick test-bigwindow test-desktopfront test-selfmove test-deskcomp test-bgpart test-glassframe test-animbg test-embedfocus test-pen test-touchcursor test-unmapcfg test-wlapp test-wtsevents test-sessionend test-onedisplay test-inputconf test-xfsmap test-wlfsout test-shelldesk
+test: test-modememory test-socketguard test-session test-lock test-secure test-secure-dim test-xwindows test-privileged test-sas test-power test-elevated test-popup test-backdrop test-xfloat test-decor test-decorlook test-decorsmooth test-capture test-capborder test-wmreq test-jumpclick test-bigwindow test-desktopfront test-selfmove test-deskcomp test-bgpart test-glassframe test-animbg test-embedfocus test-pen test-keymap test-touchcursor test-unmapcfg test-wlapp test-wtsevents test-sessionend test-onedisplay test-inputconf test-xfsmap test-wlfsout test-shelldesk
 
 test-session: build
 	@[ -d "$(SG_SESSION)" ] || { echo "sg-session checkout not found at $(SG_SESSION)"; exit 2; }
@@ -245,6 +245,15 @@ test-touchcursor:
 	 sh test/touchcursor-gate.sh --mutant TOUCH_KEEPS_CURSOR >/dev/null 2>&1; rc=$$?; \
 	 [ $$rc -eq 1 ] || { echo "touchcursor-gate: the mutant TOUCH_KEEPS_CURSOR was not caught ($$rc)"; exit 1; }; \
 	 echo "touchcursor-gate: mutant TOUCH_KEEPS_CURSOR caught"
+
+# The session's keyboard layouts: KEYBOARD, KEYMAP and LAYOUT on the control socket.
+.PHONY: test-keymap
+test-keymap:
+	@sh test/keymap-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || [ $$rc -eq 0 ] || exit $$rc; \
+	 for m in LAYOUT_GROUP_ONLY KEYMAP_FIRST_LAYOUT; do \
+	   sh test/keymap-gate.sh --mutant $$m >/dev/null 2>&1; rc=$$?; [ $$rc -eq 1 ] || { echo "keymap-gate: the mutant $$m was not caught ($$rc)"; exit 1; }; \
+	   echo "keymap-gate: mutant $$m caught"; \
+	 done
 
 .PHONY: test-pen
 test-pen:

@@ -12,6 +12,7 @@
 #include "config.h"
 
 #include <assert.h>
+#include <stdio.h>
 #include <linux/input-event-codes.h>
 #include <stdlib.h>
 #include <string.h>
@@ -26,6 +27,7 @@
 #include <wlr/types/wlr_cursor.h>
 #include <wlr/types/wlr_data_device.h>
 #include <wlr/types/wlr_idle_notify_v1.h>
+#include <wlr/interfaces/wlr_keyboard.h>
 #include <wlr/types/wlr_keyboard_group.h>
 #include <wlr/types/wlr_primary_selection.h>
 #include <wlr/types/wlr_relative_pointer_v1.h>
@@ -919,6 +921,162 @@ cleanup:
 	return NULL;
 }
 
+/* sg-compositor: the session's keyboard layouts. At the start they are
+ * XKB_DEFAULT_* (sg-session's sg_keyboard_env: /etc/default/keyboard, or the
+ * user's own from Settings); Settings' KEYMAP replaces them for the rest of
+ * the session. */
+static bool keymap_named;
+static char keymap_layout[128], keymap_variant[128], keymap_options[256];
+
+static struct xkb_keymap *
+session_keymap(struct xkb_context *context, const char *layout, const char *variant, const char *options)
+{
+	struct xkb_rule_names names = {.layout = layout, .variant = variant ? variant : "", .options = options ? options : ""};
+	return xkb_keymap_new_from_names(context, layout ? &names : NULL, XKB_KEYMAP_COMPILE_NO_FLAGS);
+}
+
+static void
+handle_keyboard_device_destroy(struct wl_listener *listener, void *data)
+{
+	struct cg_keyboard *kb = wl_container_of(listener, kb, destroy);
+	(void) data;
+	wl_list_remove(&kb->destroy.link);
+	wl_list_remove(&kb->link);
+	free(kb);
+}
+
+/* the layout the keyboard types with now: its index, and its name in buf */
+static unsigned
+current_layout(struct cg_seat *seat, char *buf, size_t len)
+{
+	struct cg_keyboard *kb;
+	buf[0] = 0;
+	wl_list_for_each (kb, &seat->keyboards, link) {
+		if (kb->is_virtual || !kb->keyboard->xkb_state) {
+			continue;
+		}
+		xkb_layout_index_t index = xkb_state_serialize_layout(kb->keyboard->xkb_state, XKB_STATE_LAYOUT_EFFECTIVE);
+		const char *name = xkb_keymap_layout_get_name(kb->keyboard->keymap, index);
+		snprintf(buf, len, "%s", name ? name : "");
+		return index;
+	}
+	return 0;
+}
+
+static void
+set_layout(struct wlr_keyboard *keyboard, unsigned index)
+{
+	wlr_keyboard_notify_modifiers(keyboard, keyboard->modifiers.depressed, keyboard->modifiers.latched,
+				      keyboard->modifiers.locked, index);
+}
+
+bool
+seat_lock_layout(struct cg_seat *seat, unsigned index)
+{
+	struct cg_keyboard *kb;
+	struct cg_keyboard_group *group;
+	bool any = false;
+	wl_list_for_each (kb, &seat->keyboards, link) {
+		if (kb->is_virtual || !kb->keyboard->keymap || index >= xkb_keymap_num_layouts(kb->keyboard->keymap)) {
+			continue;
+		}
+#ifndef SG_MUTANT_LAYOUT_GROUP_ONLY
+		/* the device's own state too: the group keyboard takes it back
+		 * from its devices at their next modifier change (a Shift) */
+		set_layout(kb->keyboard, index);
+#endif
+		any = true;
+	}
+	wl_list_for_each (group, &seat->keyboard_groups, link) {
+		struct wlr_keyboard *keyboard = &group->wlr_group->keyboard;
+		if (!group->is_virtual && keyboard->keymap && index < xkb_keymap_num_layouts(keyboard->keymap)) {
+			set_layout(keyboard, index);
+			any = true;
+		}
+	}
+	return any;
+}
+
+bool
+seat_set_keymap(struct cg_seat *seat, const char *layout, const char *variant, const char *options)
+{
+	struct xkb_context *context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
+	struct xkb_keymap *keymap;
+	struct cg_keyboard *kb;
+	struct cg_keyboard_group *group;
+	char name[128];
+	unsigned index, n;
+
+	if (!context) {
+		return false;
+	}
+	if (!(keymap = session_keymap(context, layout, variant, options))) {
+		xkb_context_unref(context);
+		return false;
+	}
+	snprintf(keymap_layout, sizeof(keymap_layout), "%s", layout);
+	snprintf(keymap_variant, sizeof(keymap_variant), "%s", variant ? variant : "");
+	snprintf(keymap_options, sizeof(keymap_options), "%s", options ? options : "");
+	keymap_named = true;
+
+	/* the person keeps typing in the layout they were (Windows keeps the
+	 * input language when a keyboard is added) */
+	current_layout(seat, name, sizeof(name));
+	index = 0;
+#ifndef SG_MUTANT_KEYMAP_FIRST_LAYOUT
+	n = xkb_keymap_num_layouts(keymap);
+	for (unsigned i = 0; name[0] && i < n; i++) {
+		const char *other = xkb_keymap_layout_get_name(keymap, i);
+		if (other && !strcmp(other, name)) {
+			index = i;
+			break;
+		}
+	}
+#else
+	(void) n;
+#endif
+	/* every hardware keyboard, and the groups they are in (whose keymap
+	 * the seat sends the focused program); a virtual keyboard keeps the
+	 * keymap its client gave it */
+	wl_list_for_each (kb, &seat->keyboards, link) {
+		if (!kb->is_virtual) {
+			wlr_keyboard_set_keymap(kb->keyboard, keymap);
+		}
+	}
+	wl_list_for_each (group, &seat->keyboard_groups, link) {
+		if (!group->is_virtual) {
+			wlr_keyboard_set_keymap(&group->wlr_group->keyboard, keymap);
+		}
+	}
+	xkb_keymap_unref(keymap);
+	xkb_context_unref(context);
+	if (index) {
+		seat_lock_layout(seat, index);
+	}
+	wlr_log(WLR_INFO, "keyboard layouts now %s (%s) options %s, typing in layout %u", keymap_layout, keymap_variant,
+		keymap_options, index);
+	return true;
+}
+
+void
+seat_keyboard_status(struct cg_seat *seat, char *out, size_t len)
+{
+	char name[128];
+	unsigned count = 0, index = current_layout(seat, name, sizeof(name));
+	struct cg_keyboard *kb;
+	const char *layout = keymap_named ? keymap_layout : getenv("XKB_DEFAULT_LAYOUT");
+	const char *variant = keymap_named ? keymap_variant : getenv("XKB_DEFAULT_VARIANT");
+	const char *options = keymap_named ? keymap_options : getenv("XKB_DEFAULT_OPTIONS");
+	wl_list_for_each (kb, &seat->keyboards, link) {
+		if (!kb->is_virtual && kb->keyboard->keymap) {
+			count = xkb_keymap_num_layouts(kb->keyboard->keymap);
+			break;
+		}
+	}
+	snprintf(out, len, "group=%u count=%u layout=%s variant=%s options=%s", index, count, layout ? layout : "",
+		 variant ? variant : "", options ? options : "");
+}
+
 static struct cg_keyboard_group *
 handle_new_keyboard(struct cg_seat *seat, struct wlr_keyboard *keyboard, bool virtual)
 {
@@ -928,7 +1086,8 @@ handle_new_keyboard(struct cg_seat *seat, struct wlr_keyboard *keyboard, bool vi
 		return NULL;
 	}
 
-	struct xkb_keymap *keymap = xkb_keymap_new_from_names(context, NULL, XKB_KEYMAP_COMPILE_NO_FLAGS);
+	struct xkb_keymap *keymap = session_keymap(context, keymap_named ? keymap_layout : NULL, keymap_variant,
+						   keymap_options);
 	if (!keymap) {
 		wlr_log(WLR_ERROR, "Unable to configure keyboard: keymap does not exist");
 		xkb_context_unref(context);
@@ -940,6 +1099,15 @@ handle_new_keyboard(struct cg_seat *seat, struct wlr_keyboard *keyboard, bool vi
 	xkb_keymap_unref(keymap);
 	xkb_context_unref(context);
 	wlr_keyboard_set_repeat_info(keyboard, 25, 600);
+
+	struct cg_keyboard *kb = calloc(1, sizeof(*kb));
+	if (kb) {
+		kb->keyboard = keyboard;
+		kb->is_virtual = virtual;
+		kb->destroy.notify = handle_keyboard_device_destroy;
+		wl_signal_add(&keyboard->base.events.destroy, &kb->destroy);
+		wl_list_insert(seat->keyboards.prev, &kb->link);
+	}
 
 	struct cg_keyboard_group *group = cg_keyboard_group_add(keyboard, seat, virtual);
 
@@ -1863,6 +2031,10 @@ handle_destroy(struct wl_listener *listener, void *data)
 	wl_list_remove(&seat->request_set_selection.link);
 	wl_list_remove(&seat->request_set_primary_selection.link);
 
+	struct cg_keyboard *kb, *kb_tmp;
+	wl_list_for_each_safe (kb, kb_tmp, &seat->keyboards, link) {
+		handle_keyboard_device_destroy(&kb->destroy, NULL);
+	}
 	struct cg_keyboard_group *group, *group_tmp;
 	wl_list_for_each_safe (group, group_tmp, &seat->keyboard_groups, link) {
 		wlr_keyboard_group_destroy(group->wlr_group);
@@ -1915,6 +2087,8 @@ static char test_buf[4096];
 static size_t test_len;
 static double test_x = 0.5, test_y = 0.5;
 static bool test_plugged;
+static struct wlr_keyboard test_keyboard;
+static bool test_keyboard_plugged;
 
 static uint32_t
 test_now(void)
@@ -1975,6 +2149,23 @@ test_tablet_line(const char *line)
 		struct wlr_touch_up_event ev = {.touch = &test_touch, .time_msec = test_now(), .touch_id = id};
 		wl_signal_emit_mutable(&test_touch.events.up, &ev);
 		wl_signal_emit_mutable(&test_touch.events.frame, NULL);
+	} else if (!strncmp(line, "kplug", 5)) {
+		/* a hardware keyboard (the session's keymap, layout switching) */
+		static const struct wlr_keyboard_impl test_keyboard_impl = {.name = "sg-test-keyboard"};
+		if (!test_keyboard_plugged) {
+			test_keyboard_plugged = true;
+			wlr_keyboard_init(&test_keyboard, &test_keyboard_impl, "sg-test-keyboard");
+			test_seat->new_input.notify(&test_seat->new_input, &test_keyboard.base);
+		}
+	} else if (sscanf(line, "key %u %u", &code, &pressed) == 2) {
+		if (test_keyboard_plugged) {
+			struct wlr_keyboard_key_event ev = {.time_msec = test_now(),
+							    .keycode = code,
+							    .update_state = true,
+							    .state = pressed ? WL_KEYBOARD_KEY_STATE_PRESSED
+									     : WL_KEYBOARD_KEY_STATE_RELEASED};
+			wlr_keyboard_notify_key(&test_keyboard, &ev);
+		}
 	} else if (!strncmp(line, "plug", 4)) {
 		/* SG_TEST_TABLET_LATE: the tablet arrives now (a pen first seen
 		 * after programs started) */

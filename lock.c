@@ -192,6 +192,28 @@ uid_may_lock(struct cg_lock *lock, uid_t uid)
 	return uid == getuid() || uid_may_unlock(lock, uid);
 }
 
+/* KEYMAP's names: XKB's characters only (what xkbcommon's rules take), at
+ * most four layouts; "-" is "none" for the variants and options */
+static bool
+keymap_names_ok(const char *s, bool layouts)
+{
+	int commas = 0;
+	if (!layouts && !strcmp(s, "-")) {
+		return true;
+	}
+	if (!*s) {
+		return false;
+	}
+	for (const char *c = s; *c; c++) {
+		if (!((*c >= 'a' && *c <= 'z') || (*c >= 'A' && *c <= 'Z') || (*c >= '0' && *c <= '9') ||
+		      strchr("_,:()+-", *c))) {
+			return false;
+		}
+		commas += *c == ',';
+	}
+	return !layouts || commas < 4;
+}
+
 static int
 listen_on(const char *path)
 {
@@ -521,7 +543,7 @@ static int
 handle_control_connection(int fd, uint32_t mask, void *data)
 {
 	struct cg_lock *lock = data;
-	char buf[64] = {0}, remote_reply[128];
+	char buf[512] = {0}, remote_reply[128], kbd_reply[640];
 	const char *reply;
 	int passed_fd = -1;
 	int fds[3] = {-1, -1, -1}, n_fds = 0;
@@ -830,6 +852,43 @@ handle_control_connection(int fd, uint32_t mask, void *data)
 		} else {
 			elevated_list(lock->server, list, sizeof(list));
 			reply = list;
+		}
+	} else if (!strcmp(buf, "KEYBOARD") || !strncmp(buf, "KEYMAP ", 7) || !strncmp(buf, "LAYOUT ", 7)) {
+		/* The session's keyboard layouts: Settings changes them (KEYMAP
+		 * layouts variants|- options|-), a program's ActivateKeyboardLayout
+		 * switches to one (LAYOUT index, wine-sg), and KEYBOARD says what
+		 * they are. Anyone in the session, as any Windows program may load
+		 * and activate layouts; never during a lock or a secure prompt,
+		 * whose screens are typed into with the layout they came up in. */
+		char layout[128], variant[128], options[256];
+		unsigned index;
+		int got;
+		if (!uid_may_lock(lock, uid)) {
+			AUDIT("refused %.8s from uid %d", buf, (int) uid);
+			reply = "ERR not permitted\n";
+		} else if (!strcmp(buf, "KEYBOARD")) {
+			seat_keyboard_status(lock->server->seat, kbd_reply + 3, sizeof(kbd_reply) - 4);
+			memcpy(kbd_reply, "OK ", 3);
+			strcat(kbd_reply, "\n");
+			reply = kbd_reply;
+		} else if (lock->locked || lock->secure || lock->sas) {
+			reply = "ERR locked\n";
+		} else if (buf[0] == 'L') {
+			char extra;
+			if (sscanf(buf + 7, "%u %c", &index, &extra) == 1 && seat_lock_layout(lock->server->seat, index)) {
+				reply = "OK\n";
+			} else {
+				reply = "ERR no such layout\n";
+			}
+		} else if ((got = sscanf(buf + 7, "%127s %127s %255s", layout, variant, options)) < 1 ||
+			   !keymap_names_ok(layout, true) || (got > 1 && !keymap_names_ok(variant, false)) ||
+			   (got > 2 && !keymap_names_ok(options, false))) {
+			reply = "ERR bad keymap\n";
+		} else if (!seat_set_keymap(lock->server->seat, layout, got > 1 && strcmp(variant, "-") ? variant : NULL,
+					    got > 2 && strcmp(options, "-") ? options : NULL)) {
+			reply = "ERR no such layout\n";
+		} else {
+			reply = "OK\n";
 		}
 	} else if (!strcmp(buf, "STATUS")) {
 		reply = lock->secure ? "OK secure\n" : lock->locked ? "OK locked\n" : "OK unlocked\n";
