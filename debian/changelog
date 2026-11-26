@@ -1,3 +1,21 @@
+sg-compositor (0.2.0+sg84) unstable; urgency=medium
+
+  * Elevated programs no longer reach the lock (i0635): -E CGROUPS names
+    where they run (sg-session passes sg-brokerd.service/elevated, a control
+    group of their own). They are the machine account, as the lock screen
+    and the consent prompt are, so before an elevated program could connect
+    to the privileged socket -- its window shown over the locked session --
+    and send the control socket's lock commands: UNLOCK unlocked the session
+    with no password, and SECURE, SAS, RELEASE, LOCAL, WATCH, SHADOW, REMOTE
+    were its too. A non-root client in -E's groups (the kernel's word, as for
+    -R) is now refused the privileged socket and those commands, as an
+    elevated program on Windows never reaches the secure desktop; it keeps
+    ELEVATED (its own display) and what anyone in the session may. Gate:
+    make test-elevated-cgroup (QA VM: 15/15; before 9 FAIL; mutant
+    ELEVATED_ANY_CGROUP 9 FAIL).
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Thu, 26 Nov 2026 09:00:00 -0800
+
 sg-compositor (0.2.0+sg83) unstable; urgency=medium
 
   * Remote support (ADR 0010 pattern A): -R CGROUPS narrows who on the

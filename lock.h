@@ -50,6 +50,17 @@ struct cg_lock {
 	 * focusable while locked -- but is not offered capture or injection.
 	 * Root always is. NULL (no -R): every privileged client is, as before. */
 	const char *support_cgroups;
+	/* -E: where elevated programs run (sg-brokerd's elevated control group,
+	 * /system.slice/sg-brokerd.service/elevated). They run as the machine
+	 * account, as the lock screen and the consent prompt do, but are none of
+	 * those: on Windows an elevated program lives on the user's desktop and
+	 * never on the secure desktop. A machine-account process there is
+	 * refused the privileged socket (so nothing of it shows while the
+	 * session is locked, and it captures and injects nothing), and the
+	 * control socket's lock commands (UNLOCK, SECURE, SAS, ...); it may
+	 * still hand over its own display (ELEVATED) and use what anyone in the
+	 * session may. Root always may. NULL (no -E): as before. */
+	const char *elevated_cgroups;
 	/* Remote support captured the screen in the last few seconds: the frame
 	 * round the screen shows (as the console shadow's does), so the person
 	 * at the machine knows -- however short-lived the capturing connection. */
@@ -85,7 +96,8 @@ struct cg_lock {
 void lock_session_update(struct cg_lock *lock);
 
 bool lock_init(struct cg_lock *lock, struct cg_server *server, const char *lock_socket,
-	       const char *control_socket, const char *lock_uid, const char *support_cgroups);
+	       const char *control_socket, const char *lock_uid, const char *support_cgroups,
+	       const char *elevated_cgroups);
 void lock_fini(struct cg_lock *lock);
 
 /* Clients that connected on the privileged socket. */

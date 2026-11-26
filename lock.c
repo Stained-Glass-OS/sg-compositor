@@ -185,21 +185,21 @@ static void notice_frame_update(struct cg_server *server);
 #define SO_PEERPIDFD 77
 #endif
 
-/* Is the process at the other end of fd in one of the control groups of the
- * comma-separated list (full cgroup v2 paths), or below one? The kernel's
- * word again: the cgroup of the process that connected, read through
+/* The control group of the process at the other end of fd (its "0::/..."
+ * line), which peer_in_cgroups matches against a comma-separated list (full
+ * cgroup v2 paths, a group or below it). The kernel's word again: the cgroup of the process that connected, read through
  * /proc while its pidfd shows it has not exited -- so a pid reused since
  * cannot answer for it. Only root can move a process into a system
  * service's cgroup, so a machine-account program started anywhere else (an
  * elevated program, under sg-brokerd) cannot place itself there. Anything
  * that cannot be established: no. */
 static bool
-peer_in_cgroups(int fd, const char *list)
+peer_cgroup(int fd, char *line, size_t size)
 {
 	struct ucred cred;
 	socklen_t len = sizeof(cred), plen = sizeof(int);
 	int pidfd = -1;
-	char path[64], line[4096];
+	char path[64];
 	bool found = false;
 	FILE *f;
 
@@ -211,7 +211,7 @@ peer_in_cgroups(int fd, const char *list)
 	}
 	snprintf(path, sizeof(path), "/proc/%d/cgroup", (int) cred.pid);
 	if ((f = fopen(path, "re"))) {
-		while (fgets(line, sizeof(line), f)) {
+		while (fgets(line, (int) size, f)) {
 			if (!strncmp(line, "0::/", 4)) {
 				line[strcspn(line, "\n")] = 0;
 				found = true;
@@ -228,12 +228,13 @@ peer_in_cgroups(int fd, const char *list)
 		}
 	}
 	close(pidfd);
-	if (!found) {
-		return false;
-	}
-#ifdef SG_MUTANT_SUPPORT_ANY_CGROUP
-	return true;
-#endif
+	return found;
+}
+
+/* line: a "0::/..." line of /proc/PID/cgroup */
+static bool
+cgroup_in_list(const char *line, const char *list)
+{
 	const char *cg = line + 3;
 	for (const char *e = list; *e;) {
 		size_t n = strcspn(e, ",");
@@ -249,6 +250,19 @@ peer_in_cgroups(int fd, const char *list)
 }
 
 static bool
+peer_in_cgroups(int fd, const char *list)
+{
+	char line[4096];
+	if (!peer_cgroup(fd, line, sizeof(line))) {
+		return false;
+	}
+#ifdef SG_MUTANT_SUPPORT_ANY_CGROUP
+	return true;
+#endif
+	return cgroup_in_list(line, list);
+}
+
+static bool
 peer_uid(int fd, uid_t *uid)
 {
 	struct ucred cred;
@@ -258,6 +272,26 @@ peer_uid(int fd, uid_t *uid)
 	}
 	*uid = cred.uid;
 	return true;
+}
+
+/* -E: is the (non-root) process at the other end of fd an elevated program?
+ * The kernel's word on its control group (peer_in_cgroups). Only root moves
+ * a process out of sg-brokerd's elevated group, so an elevated program
+ * cannot leave it; one that cannot be placed counts as elevated. */
+static bool
+peer_is_elevated(struct cg_lock *lock, int fd, uid_t uid)
+{
+#ifdef SG_MUTANT_ELEVATED_ANY_CGROUP
+	return false;
+#endif
+	char line[4096];
+	if (uid == 0 || !lock->elevated_cgroups) {
+		return false;
+	}
+	if (!peer_cgroup(fd, line, sizeof(line))) {
+		return true;
+	}
+	return cgroup_in_list(line, lock->elevated_cgroups);
 }
 
 /* The machine session's account, or root. */
@@ -430,6 +464,11 @@ handle_lock_connection(int fd, uint32_t mask, void *data)
 	}
 	if (!peer_uid(client_fd, &uid) || !uid_may_unlock(lock, uid)) {
 		AUDIT("privileged socket refused uid %d", (int) uid);
+		close(client_fd);
+		return 0;
+	}
+	if (peer_is_elevated(lock, client_fd, uid)) {
+		AUDIT("privileged socket refused uid %d: an elevated program", (int) uid);
 		close(client_fd);
 		return 0;
 	}
@@ -721,6 +760,10 @@ handle_control_connection(int fd, uint32_t mask, void *data)
 		close(client_fd);
 		return 0;
 	}
+	/* -E: an elevated program, though it runs as the machine account, is
+	 * refused the lock's own commands -- it is not the lock screen, the
+	 * consent prompt or Remote Desktop's monitor */
+	bool elevated = peer_is_elevated(lock, client_fd, uid);
 	{
 		/* REMOTE may come with a descriptor, ELEVATED with three
 		 * (SCM_RIGHTS). */
@@ -763,7 +806,7 @@ handle_control_connection(int fd, uint32_t mask, void *data)
 			reply = "ERR not permitted\n";
 		}
 	} else if (!strcmp(buf, "UNLOCK")) {
-		if (uid_may_unlock(lock, uid)) {
+		if (uid_may_unlock(lock, uid) && !elevated) {
 			lock_release(lock);
 			reply = "OK unlocked\n";
 		} else {
@@ -772,7 +815,7 @@ handle_control_connection(int fd, uint32_t mask, void *data)
 		}
 	} else if (!strcmp(buf, "WATCH")) {
 		struct cg_watcher *w;
-		if (!uid_may_unlock(lock, uid) || !(w = calloc(1, sizeof(*w)))) {
+		if (!(uid_may_unlock(lock, uid) && !elevated) || !(w = calloc(1, sizeof(*w)))) {
 			reply = "ERR not permitted\n";
 		} else {
 			fcntl(client_fd, F_SETFL, fcntl(client_fd, F_GETFL) | O_NONBLOCK);
@@ -857,7 +900,7 @@ handle_control_connection(int fd, uint32_t mask, void *data)
 		reply = lock->server->control_inhibitors > 0 || !wl_list_empty(&lock->server->inhibitors)
 				? "OK inhibited\n" : "OK not inhibited\n";
 	} else if (!strcmp(buf, "SECURE")) {
-		if (!uid_may_unlock(lock, uid)) {
+		if (!(uid_may_unlock(lock, uid) && !elevated)) {
 			AUDIT("refused SECURE from uid %d", (int) uid);
 			reply = "ERR not permitted\n";
 		} else if (lock_secure_engage(lock)) {
@@ -866,7 +909,7 @@ handle_control_connection(int fd, uint32_t mask, void *data)
 			reply = "ERR locked\n";
 		}
 	} else if (!strncmp(buf, "SAS ", 4)) {
-		if (!uid_may_unlock(lock, uid)) {
+		if (!(uid_may_unlock(lock, uid) && !elevated)) {
 			AUDIT("refused SAS from uid %d", (int) uid);
 			reply = "ERR not permitted\n";
 		} else if (lock_sas_action(lock, buf + 4)) {
@@ -875,7 +918,7 @@ handle_control_connection(int fd, uint32_t mask, void *data)
 			reply = "ERR not on the security screen\n";
 		}
 	} else if (!strcmp(buf, "RELEASE")) {
-		if (!uid_may_unlock(lock, uid)) {
+		if (!(uid_may_unlock(lock, uid) && !elevated)) {
 			AUDIT("refused RELEASE from uid %d", (int) uid);
 			reply = "ERR not permitted\n";
 		} else {
@@ -883,7 +926,7 @@ handle_control_connection(int fd, uint32_t mask, void *data)
 			reply = lock->locked ? "OK locked\n" : "OK unlocked\n";
 		}
 	} else if (!strcmp(buf, "SHADOW view") || !strcmp(buf, "SHADOW control")) {
-		if (!uid_may_unlock(lock, uid)) {
+		if (!(uid_may_unlock(lock, uid) && !elevated)) {
 			AUDIT("refused SHADOW from uid %d", (int) uid);
 			reply = "ERR not permitted\n";
 		} else if (passed_fd < 0) {
@@ -895,7 +938,7 @@ handle_control_connection(int fd, uint32_t mask, void *data)
 			reply = ok ? remote_reply : "ERR busy\n";
 		}
 	} else if (!strcmp(buf, "REMOTE")) {
-		if (!uid_may_unlock(lock, uid)) {
+		if (!(uid_may_unlock(lock, uid) && !elevated)) {
 			AUDIT("refused REMOTE from uid %d", (int) uid);
 			reply = "ERR not permitted\n";
 		} else if (lock->server->shadow_client) {
@@ -910,7 +953,7 @@ handle_control_connection(int fd, uint32_t mask, void *data)
 			reply = "ERR cannot\n";
 		}
 	} else if (!strcmp(buf, "LOCAL")) {
-		if (!uid_may_unlock(lock, uid)) {
+		if (!(uid_may_unlock(lock, uid) && !elevated)) {
 			AUDIT("refused LOCAL from uid %d", (int) uid);
 			reply = "ERR not permitted\n";
 		} else {
@@ -1419,7 +1462,7 @@ parse_uid(const char *s, uid_t *out)
 
 bool
 lock_init(struct cg_lock *lock, struct cg_server *server, const char *lock_socket, const char *control_socket,
-	  const char *lock_uid, const char *support_cgroups)
+	  const char *lock_uid, const char *support_cgroups, const char *elevated_cgroups)
 {
 	struct wl_event_loop *loop = wl_display_get_event_loop(server->wl_display);
 
@@ -1431,6 +1474,7 @@ lock_init(struct cg_lock *lock, struct cg_server *server, const char *lock_socke
 	wl_list_init(&lock->session_watchers);
 	wl_display_set_global_filter(server->wl_display, global_filter, lock);
 	lock->support_cgroups = support_cgroups && *support_cgroups ? support_cgroups : NULL;
+	lock->elevated_cgroups = elevated_cgroups && *elevated_cgroups ? elevated_cgroups : NULL;
 
 	if (lock_uid) {
 		if (!parse_uid(lock_uid, &lock->lock_uid)) {

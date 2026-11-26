@@ -219,6 +219,29 @@ in the capture, black vs picture while locked, audits. Mutants (each built):
 `SG_MUTANT_SUPPORT_ANY_CGROUP`, `SG_MUTANT_SUPPORT_ALL_PRIVILEGED`,
 `SG_MUTANT_SUPPORT_NO_NOTICE`.
 
+### Elevated programs: no privileged socket, no lock commands (`-E`, `make test-elevated-cgroup`)
+
+An elevated program runs as the -U account too, so by uid it could connect
+to the privileged socket (its window then showed over the locked session) and
+send the control socket's lock commands -- **UNLOCK without a password**,
+SECURE, SAS, RELEASE, LOCAL, WATCH, SHADOW, REMOTE (found 2026-11-26, i0635).
+On Windows an elevated program lives on the user's desktop and never reaches
+the secure desktop. sg-brokerd now runs elevated programs in a control group
+of their own (`/system.slice/sg-brokerd.service/elevated`, Delegate=yes +
+DelegateSubgroup=broker; only root moves a process out of it); `-E CGROUPS`
+names it, and a non-root client there (SO_PEERPIDFD + /proc, as -R; one whose
+group cannot be read counts as elevated) is refused the privileged socket
+(`audit: privileged socket refused uid N: an elevated program`) and those
+commands. It keeps ELEVATED (handing over its own display) and what anyone in
+the session may (ACTIVATE, SESSION, MAGNIFY ...). The consent prompt
+(sg-brokerd.service/broker), the lock screen (sg-lockd.service) and remote
+support (sg-wineserver.service) are unaffected. Without -E: as before.
+
+Gate `test/elevated-cgroup-gate.sh` (root + systemd: the QA VM only): clients
+as transient system units, one in -E's group, one not; privileged socket,
+UNLOCK while locked, the other commands, ELEVATED, ACTIVATE, audits. Before
+(sg83, no -E) 9 FAIL; mutant `SG_MUTANT_ELEVATED_ANY_CGROUP` 9 FAIL.
+
 ## Display power and idle (`make test-power`)
 
 Settings' "Turn off the screen after" is sg-session's `sg-settingsctl`

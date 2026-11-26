@@ -74,6 +74,12 @@ test-privileged: build
 test-support: build
 	@sh test/support-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc
 
+# Elevated programs (sg-brokerd's elevated control group, -E): no privileged
+# socket, no lock commands (i0635). Root + systemd: QA VM only.
+.PHONY: test-elevated-cgroup
+test-elevated-cgroup: build
+	@sh test/elevated-cgroup-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc
+
 # The volume keys: sg-settingsctl steps the volume (with the chime) or mutes.
 .PHONY: test-volkeys
 test-volkeys: build
