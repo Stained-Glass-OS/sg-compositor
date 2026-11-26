@@ -1,3 +1,22 @@
+sg-compositor (0.2.0+sg83) unstable; urgency=medium
+
+  * Remote support (ADR 0010 pattern A): -R CGROUPS narrows who on the
+    privileged socket may capture the screen and inject input to root and
+    the machine account's processes in those control groups -- sg-session
+    passes /system.slice/sg-wineserver.service, the Windows services and the
+    helpers they start (a VNC server's, AnyDesk's). The lock screen, the
+    consent prompt and every elevated program are the machine account too:
+    they stay privileged (seen while locked) but get the public capture and
+    no virtual keyboard or pointer -- before, an elevated program could
+    photograph the lock screen and type into it. The control group is the
+    kernel's word (SO_PEERPIDFD, /proc, the pidfd proving no pid reuse).
+    While remote support captures, the console shadow's amber frame shows
+    round the screen until 3 s after its last capture, and it is audited.
+    Gate: make test-support (QA VM; mutants ANY_CGROUP, ALL_PRIVILEGED,
+    NO_NOTICE).
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Wed, 25 Nov 2026 17:45:00 -0800
+
 sg-compositor (0.2.0+sg82) unstable; urgency=medium
 
   * The session's keyboard layouts can change without signing out, and a

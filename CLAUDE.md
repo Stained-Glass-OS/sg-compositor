@@ -183,6 +183,42 @@ lock state; the viewer captures the console's own output. The reply is
   sg-rdp-authd's monitor and sg-brokerd before `SHADOW` is sent. Gate:
   sg-session's `make test-rdp-shadow`.
 
+### Remote support: capture and input for the services (`-R`, `make test-support`)
+
+ADR 0010 pattern A for Windows remote-support tools (VNC servers, AnyDesk):
+a service in the machine session starts a helper in the person's session
+(wine-sg 9624-9626), which captures the screen -- lock and sign-in screens
+included -- and types into it on the **privileged socket**. Who there gets
+capture (wlroots' screencopy, export-dmabuf, gamma) and injection (virtual
+keyboard and pointer) is now narrower than who is privileged:
+
+- **root**, and connections root hands over (REMOTE, SHADOW): as before;
+- the **-U account (sgsystem) only in the control groups `-R` lists**
+  (comma-separated full cgroup v2 paths, or below them; sg-session passes
+  `/system.slice/sg-wineserver.service`, where services.exe, the services and
+  everything they start run). Checked once at connect from the connecting
+  process: SO_PEERPIDFD, `/proc/PID/cgroup`, then the pidfd polled to prove the
+  process had not exited (no pid reuse). Only root can move a process into a
+  system unit's cgroup;
+- any other sgsystem client -- the lock screen, the consent prompt, and every
+  **elevated program** (sg-brokerd's cgroup) -- stays privileged (seen and
+  focusable while locked) but is offered the public capture and no injection.
+  Before -R, an elevated program could capture the lock screen and type into
+  it. Without -R nothing changes (the older gates run without it).
+
+**The notice**: while an -R client (not root) makes screencopy or dmabuf
+frames, the console shadow's amber frame shows over everything, and goes 3 s
+after its last capture (`CAPTURE_NOTICE_MS`); `audit: remote support is
+capturing the screen` / `stopped capturing`. No consent prompt: Windows has
+none for a service an administrator installed.
+
+Gate `test/support-gate.sh` (root + systemd: the QA VM only; 77 elsewhere):
+clients as transient system units (`systemd-run -p User=sgsystem`), one in
+-R's cgroup, one not; offers, which screencopy global, the frame on/off and
+in the capture, black vs picture while locked, audits. Mutants (each built):
+`SG_MUTANT_SUPPORT_ANY_CGROUP`, `SG_MUTANT_SUPPORT_ALL_PRIVILEGED`,
+`SG_MUTANT_SUPPORT_NO_NOTICE`.
+
 ## Display power and idle (`make test-power`)
 
 Settings' "Turn off the screen after" is sg-session's `sg-settingsctl`

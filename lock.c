@@ -30,6 +30,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -163,7 +164,89 @@ struct cg_privileged_client {
 	struct wl_list link;
 	struct wl_client *client;
 	struct wl_listener destroy;
+	struct cg_lock *lock;
+	/* may bind screen capture and input injection: root, and remote support
+	 * (-R); not the lock screen, a consent prompt or an elevated program */
+	bool may_capture;
+	/* remote support (a machine-account client admitted by -R): a capture
+	 * shows the frame round the screen for a while */
+	bool notice;
+	struct wl_listener resource_created;
 };
+
+/* How long the frame stays after a remote-support client's last capture: a
+ * VNC server polls the screen several times a second while someone views it,
+ * and not at all when nobody does. */
+#define CAPTURE_NOTICE_MS 3000
+
+static void notice_frame_update(struct cg_server *server);
+
+#ifndef SO_PEERPIDFD
+#define SO_PEERPIDFD 77
+#endif
+
+/* Is the process at the other end of fd in one of the control groups of the
+ * comma-separated list (full cgroup v2 paths), or below one? The kernel's
+ * word again: the cgroup of the process that connected, read through
+ * /proc while its pidfd shows it has not exited -- so a pid reused since
+ * cannot answer for it. Only root can move a process into a system
+ * service's cgroup, so a machine-account program started anywhere else (an
+ * elevated program, under sg-brokerd) cannot place itself there. Anything
+ * that cannot be established: no. */
+static bool
+peer_in_cgroups(int fd, const char *list)
+{
+	struct ucred cred;
+	socklen_t len = sizeof(cred), plen = sizeof(int);
+	int pidfd = -1;
+	char path[64], line[4096];
+	bool found = false;
+	FILE *f;
+
+	if (getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &cred, &len) < 0 || cred.pid <= 0) {
+		return false;
+	}
+	if (getsockopt(fd, SOL_SOCKET, SO_PEERPIDFD, &pidfd, &plen) < 0 || pidfd < 0) {
+		return false;
+	}
+	snprintf(path, sizeof(path), "/proc/%d/cgroup", (int) cred.pid);
+	if ((f = fopen(path, "re"))) {
+		while (fgets(line, sizeof(line), f)) {
+			if (!strncmp(line, "0::/", 4)) {
+				line[strcspn(line, "\n")] = 0;
+				found = true;
+				break;
+			}
+		}
+		fclose(f);
+	}
+	{
+		/* a pidfd is readable once its process has exited */
+		struct pollfd pfd = {.fd = pidfd, .events = POLLIN};
+		if (poll(&pfd, 1, 0) != 0) {
+			found = false;
+		}
+	}
+	close(pidfd);
+	if (!found) {
+		return false;
+	}
+#ifdef SG_MUTANT_SUPPORT_ANY_CGROUP
+	return true;
+#endif
+	const char *cg = line + 3;
+	for (const char *e = list; *e;) {
+		size_t n = strcspn(e, ",");
+		if (n > 1 && e[0] == '/' && !strncmp(cg, e, n) && (cg[n] == 0 || cg[n] == '/')) {
+			return true;
+		}
+		e += n;
+		if (*e == ',') {
+			e++;
+		}
+	}
+	return false;
+}
 
 static bool
 peer_uid(int fd, uid_t *uid)
@@ -264,7 +347,73 @@ privileged_destroy(struct wl_listener *listener, void *data)
 	(void) data;
 	wl_list_remove(&pc->link);
 	wl_list_remove(&pc->destroy.link);
+	if (pc->notice) {
+		wl_list_remove(&pc->resource_created.link);
+	}
 	free(pc);
+}
+
+static int
+capture_notice_expire(void *data)
+{
+	struct cg_lock *lock = data;
+	if (lock->support_capturing) {
+		lock->support_capturing = false;
+		AUDIT("remote support stopped capturing the screen");
+		notice_frame_update(lock->server);
+	}
+	return 0;
+}
+
+/* Every object a remote-support client makes: a screencopy (or dmabuf
+ * export) frame is a capture. */
+static void
+privileged_resource_created(struct wl_listener *listener, void *data)
+{
+	struct cg_privileged_client *pc = wl_container_of(listener, pc, resource_created);
+	const char *cls = wl_resource_get_class(data);
+
+	if (!cls || (strcmp(cls, "zwlr_screencopy_frame_v1") && strcmp(cls, "zwlr_export_dmabuf_frame_v1"))) {
+		return;
+	}
+	struct cg_lock *lock = pc->lock;
+#ifndef SG_MUTANT_SUPPORT_NO_NOTICE
+	if (!lock->support_capturing) {
+		lock->support_capturing = true;
+		AUDIT("remote support is capturing the screen: the frame shows");
+		notice_frame_update(lock->server);
+	}
+#endif
+	if (!lock->support_notice_timer) {
+		lock->support_notice_timer = wl_event_loop_add_timer(
+			wl_display_get_event_loop(lock->server->wl_display), capture_notice_expire, lock);
+	}
+	if (lock->support_notice_timer) {
+		wl_event_source_timer_update(lock->support_notice_timer, CAPTURE_NOTICE_MS);
+	}
+}
+
+/* A new privileged client: on the privileged socket, or a connection root's
+ * RDP monitor handed over (REMOTE, SHADOW). */
+static struct cg_privileged_client *
+privileged_add(struct cg_lock *lock, struct wl_client *client, bool may_capture, bool notice)
+{
+	struct cg_privileged_client *pc = calloc(1, sizeof(*pc));
+	if (!pc) {
+		return NULL;
+	}
+	pc->client = client;
+	pc->lock = lock;
+	pc->may_capture = may_capture;
+	pc->destroy.notify = privileged_destroy;
+	wl_client_add_destroy_listener(client, &pc->destroy);
+	if (notice) {
+		pc->notice = true;
+		pc->resource_created.notify = privileged_resource_created;
+		wl_client_add_resource_created_listener(client, &pc->resource_created);
+	}
+	wl_list_insert(&lock->privileged, &pc->link);
+	return pc;
 }
 
 static int
@@ -285,21 +434,28 @@ handle_lock_connection(int fd, uint32_t mask, void *data)
 		return 0;
 	}
 
+	/* Capture and injection (remote support, ADR 0010 pattern A): root, or
+	 * -- when -R names where remote support runs -- the machine account's
+	 * processes there only. Decided now, from the connecting process. */
+	bool support = uid != 0 && lock->support_cgroups;
+	bool may_capture = uid == 0 || !lock->support_cgroups || peer_in_cgroups(client_fd, lock->support_cgroups);
+
 	struct wl_client *client = wl_client_create(lock->server->wl_display, client_fd);
 	if (!client) {
 		close(client_fd);
 		return 0;
 	}
-	struct cg_privileged_client *pc = calloc(1, sizeof(*pc));
-	if (!pc) {
+	if (!privileged_add(lock, client, may_capture, support && may_capture)) {
 		wl_client_destroy(client);
 		return 0;
 	}
-	pc->client = client;
-	pc->destroy.notify = privileged_destroy;
-	wl_client_add_destroy_listener(client, &pc->destroy);
-	wl_list_insert(&lock->privileged, &pc->link);
-	AUDIT("privileged socket accepted uid %d", (int) uid);
+	if (support && may_capture) {
+		AUDIT("privileged socket accepted uid %d: remote support (capture and input)", (int) uid);
+	} else if (!may_capture) {
+		AUDIT("privileged socket accepted uid %d, without capture or input injection", (int) uid);
+	} else {
+		AUDIT("privileged socket accepted uid %d", (int) uid);
+	}
 	return 0;
 }
 
@@ -409,14 +565,10 @@ adopt_remote_client(struct cg_lock *lock, int fd)
 		close(fd);
 		return false;
 	}
-	if (!(pc = calloc(1, sizeof(*pc)))) {
+	if (!(pc = privileged_add(lock, client, true, false))) {
 		wl_client_destroy(client);
 		return false;
 	}
-	pc->client = client;
-	pc->destroy.notify = privileged_destroy;
-	wl_client_add_destroy_listener(client, &pc->destroy);
-	wl_list_insert(&lock->privileged, &pc->link);
 	server->remote_client = client;
 	server->remote_client_destroy.notify = handle_remote_client_destroy;
 	wl_client_add_destroy_listener(client, &server->remote_client_destroy);
@@ -466,6 +618,14 @@ shadow_frame_show(struct cg_server *server, bool on)
 	wlr_scene_node_set_enabled(&server->shadow_frame_tree->node, on);
 }
 
+/* The frame shows while a console shadow lasts, and while remote support
+ * captures the screen. */
+static void
+notice_frame_update(struct cg_server *server)
+{
+	shadow_frame_show(server, server->shadow_client || server->lock.support_capturing);
+}
+
 static void
 handle_shadow_client_destroy(struct wl_listener *listener, void *data)
 {
@@ -474,7 +634,7 @@ handle_shadow_client_destroy(struct wl_listener *listener, void *data)
 	wl_list_remove(&server->shadow_client_destroy.link);
 	server->shadow_client = NULL;
 	server->shadow_control = false;
-	shadow_frame_show(server, false);
+	notice_frame_update(server);
 	AUDIT("remote view ended");
 	lock_session_update(&server->lock);
 }
@@ -509,14 +669,10 @@ shadow_attach(struct cg_lock *lock, int fd, bool control, char *reply, size_t le
 		close(fd);
 		return false;
 	}
-	if (!(pc = calloc(1, sizeof(*pc)))) {
+	if (!(pc = privileged_add(lock, client, true, false))) {
 		wl_client_destroy(client);
 		return false;
 	}
-	pc->client = client;
-	pc->destroy.notify = privileged_destroy;
-	wl_client_add_destroy_listener(client, &pc->destroy);
-	wl_list_insert(&lock->privileged, &pc->link);
 	server->shadow_client = client;
 	server->shadow_control = control;
 	server->shadow_client_destroy.notify = handle_shadow_client_destroy;
@@ -929,6 +1085,21 @@ lock_client_is_privileged(struct cg_lock *lock, const struct wl_client *client)
 }
 
 bool
+lock_client_may_capture(struct cg_lock *lock, const struct wl_client *client)
+{
+	struct cg_privileged_client *pc;
+	wl_list_for_each (pc, &lock->privileged, link) {
+		if (pc->client == client) {
+#ifdef SG_MUTANT_SUPPORT_ALL_PRIVILEGED
+			return true;
+#endif
+			return pc->may_capture;
+		}
+	}
+	return false;
+}
+
+bool
 lock_view_is_privileged(struct cg_lock *lock, struct cg_view *view)
 {
 	if (!view || !view->wlr_surface || !view->wlr_surface->resource) {
@@ -1220,11 +1391,13 @@ global_filter(const struct wl_client *client, const struct wl_global *global, vo
 #endif
 	for (int i = 0; i < lock->n_restricted; i++) {
 		if (lock->restricted[i] == global) {
-			return lock_client_is_privileged(lock, client);
+			return lock_client_may_capture(lock, client);
 		}
 	}
+	/* everyone else's capture -- the lock and consent screens black --
+	 * privileged clients without the real one included */
 	if (global == lock->public_capture) {
-		return !lock_client_is_privileged(lock, client);
+		return !lock_client_may_capture(lock, client);
 	}
 	return true;
 }
@@ -1246,7 +1419,7 @@ parse_uid(const char *s, uid_t *out)
 
 bool
 lock_init(struct cg_lock *lock, struct cg_server *server, const char *lock_socket, const char *control_socket,
-	  const char *lock_uid)
+	  const char *lock_uid, const char *support_cgroups)
 {
 	struct wl_event_loop *loop = wl_display_get_event_loop(server->wl_display);
 
@@ -1257,6 +1430,7 @@ lock_init(struct cg_lock *lock, struct cg_server *server, const char *lock_socke
 	wl_list_init(&lock->watchers);
 	wl_list_init(&lock->session_watchers);
 	wl_display_set_global_filter(server->wl_display, global_filter, lock);
+	lock->support_cgroups = support_cgroups && *support_cgroups ? support_cgroups : NULL;
 
 	if (lock_uid) {
 		if (!parse_uid(lock_uid, &lock->lock_uid)) {
@@ -1285,6 +1459,10 @@ lock_init(struct cg_lock *lock, struct cg_server *server, const char *lock_socke
 void
 lock_fini(struct cg_lock *lock)
 {
+	if (lock->support_notice_timer) {
+		wl_event_source_remove(lock->support_notice_timer);
+		lock->support_notice_timer = NULL;
+	}
 	if (lock->lock_source) {
 		wl_event_source_remove(lock->lock_source);
 	}

@@ -41,6 +41,21 @@ struct cg_lock {
 
 	struct wl_list privileged; /* struct cg_privileged_client::link */
 
+	/* -R: remote support (ADR 0010 pattern A). The control groups -- full
+	 * paths, such as /system.slice/sg-wineserver.service, where the Windows
+	 * services and the helpers they start run -- whose machine-account
+	 * processes may capture the screen and inject input on the privileged
+	 * socket. Another machine-account client there (the lock screen, a
+	 * consent prompt, an elevated program) is still privileged -- seen and
+	 * focusable while locked -- but is not offered capture or injection.
+	 * Root always is. NULL (no -R): every privileged client is, as before. */
+	const char *support_cgroups;
+	/* Remote support captured the screen in the last few seconds: the frame
+	 * round the screen shows (as the console shadow's does), so the person
+	 * at the machine knows -- however short-lived the capturing connection. */
+	bool support_capturing;
+	struct wl_event_source *support_notice_timer;
+
 	/* Globals only privileged clients may bind: screen capture, input
 	 * injection, output and gamma control. */
 	const struct wl_global *restricted[16];
@@ -70,11 +85,14 @@ struct cg_lock {
 void lock_session_update(struct cg_lock *lock);
 
 bool lock_init(struct cg_lock *lock, struct cg_server *server, const char *lock_socket,
-	       const char *control_socket, const char *lock_uid);
+	       const char *control_socket, const char *lock_uid, const char *support_cgroups);
 void lock_fini(struct cg_lock *lock);
 
 /* Clients that connected on the privileged socket. */
 bool lock_client_is_privileged(struct cg_lock *lock, const struct wl_client *client);
+/* ... and of those, the ones that may capture and inject (root, remote
+ * support: -R). */
+bool lock_client_may_capture(struct cg_lock *lock, const struct wl_client *client);
 bool lock_view_is_privileged(struct cg_lock *lock, struct cg_view *view);
 
 /* May this view be seen, focused or receive input right now? While unlocked,

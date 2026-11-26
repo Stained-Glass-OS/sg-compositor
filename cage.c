@@ -294,6 +294,8 @@ usage(FILE *file, const char *cage)
 		" -L path Privileged Wayland socket, for the lock screen and remote access\n"
 		" -C path Control socket accepting LOCK, UNLOCK and STATUS\n"
 		" -U uid  Account that may unlock and connect privileged (plus root)\n"
+		" -R cgroups Comma-separated control groups whose -U processes may capture\n"
+		"\t and inject on the privileged socket (remote support); others may not\n"
 		"\n"
 		" Use -- when you want to pass arguments to APPLICATION\n",
 		cage);
@@ -303,7 +305,7 @@ static bool
 parse_args(struct cg_server *server, int argc, char *argv[])
 {
 	int c;
-	while ((c = getopt(argc, argv, "dhm:svL:C:U:")) != -1) {
+	while ((c = getopt(argc, argv, "dhm:svL:C:U:R:")) != -1) {
 		switch (c) {
 		case 'd':
 			server->xdg_decoration = true;
@@ -329,6 +331,9 @@ parse_args(struct cg_server *server, int argc, char *argv[])
 			break;
 		case 'U':
 			server->lock_uid = optarg;
+			break;
+		case 'R':
+			server->support_cgroups = optarg;
 			break;
 		case 'v':
 			fprintf(stdout, "Cage version " CAGE_VERSION "\n");
@@ -408,7 +413,8 @@ main(int argc, char *argv[])
 
 	/* sg-compositor: before any global is created or any client can connect,
 	 * so the global filter governs every bind. */
-	if (!lock_init(&server.lock, &server, server.lock_socket, server.control_socket, server.lock_uid)) {
+	if (!lock_init(&server.lock, &server, server.lock_socket, server.control_socket, server.lock_uid,
+		       server.support_cgroups)) {
 		wlr_log(WLR_ERROR, "Cannot set up the lock and privileged sockets");
 		return 1;
 	}

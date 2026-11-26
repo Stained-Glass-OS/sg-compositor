@@ -79,6 +79,7 @@ struct cg_server {
 	const char *lock_socket;
 	const char *control_socket;
 	const char *lock_uid;
+	const char *support_cgroups; /* -R */
 
 	/* sg-compositor: Remote Desktop takes over this (console) session -- the
 	 * user's windows move to an output of their own that the RDP daemon

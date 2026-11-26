@@ -67,6 +67,13 @@ test-embedfocus: build
 test-privileged: build
 	@sh test/privileged-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc
 
+# Remote support (ADR 0010 pattern A): capture and injection on the privileged
+# socket for root and the -R control groups only, and the frame while it
+# captures. Root + systemd: the QA VM only (77 elsewhere).
+.PHONY: test-support
+test-support: build
+	@sh test/support-gate.sh; rc=$$?; [ $$rc -eq 77 ] && exit 0 || exit $$rc
+
 # The volume keys: sg-settingsctl steps the volume (with the chime) or mutes.
 .PHONY: test-volkeys
 test-volkeys: build
