@@ -38,6 +38,7 @@ void xwayland_surface_restack_above(struct wlr_xwayland_surface *xs);
 bool xwayland_view_is_shell_desktop(struct cg_view *view);
 void xwayland_view_fill_layout(struct cg_view *view, const struct wlr_box *box);
 bool xwayland_view_x_box(struct cg_view *view, struct wlr_box *box);
+bool xwayland_view_parent_box(struct cg_view *view, struct wlr_box *box);
 void handle_xwayland_surface_new(struct wl_listener *listener, void *data);
 struct cg_elevated;
 void xwayland_view_create(struct cg_server *server, struct wlr_xwayland_surface *xwayland_surface,

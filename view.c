@@ -245,6 +245,45 @@ view_position(struct cg_view *view)
 				return;
 			}
 		}
+		/* a dialog (transient for a window of its program: FileZilla's
+		 * "Remember passwords?") over that window, on its display, as
+		 * Windows puts an owned window -- centred on the display under
+		 * the pointer it opened on another display, or off the screen
+		 * once Wine framed it there (GitHub #19) */
+#ifndef SG_MUTANT_DIALOG_POINTER_DISPLAY
+		struct wlr_box owner;
+		if (xwayland_view_parent_box(view, &owner)) {
+			at = wlr_output_layout_output_at(view->server->output_layout, owner.x + owner.width / 2,
+							 owner.y + owner.height / 2);
+			if (at) {
+				wlr_output_layout_get_box(view->server->output_layout, at, &one);
+			}
+			if (!wlr_box_empty(&one) && !view_extends_output_layout(view, &one)) {
+				int w, h, top;
+				view_center(view, &owner);
+				view->impl->get_geometry(view, &w, &h);
+				top = view->decorated ? decor_title_h() : 0;
+				/* whole on that display, its title bar too */
+				if (view->lx + w > one.x + one.width) {
+					view->lx = one.x + one.width - w;
+				}
+				if (view->lx < one.x) {
+					view->lx = one.x;
+				}
+				if (view->ly + h > one.y + one.height - DECOR_TASKBAR_H) {
+					view->ly = one.y + one.height - DECOR_TASKBAR_H - h;
+				}
+				if (view->ly < one.y + top) {
+					view->ly = one.y + top;
+				}
+				if (view->scene_tree) {
+					wlr_scene_node_set_position(&view->scene_tree->node, view->lx, view->ly);
+				}
+				return;
+			}
+			one = (struct wlr_box){0};
+		}
+#endif
 		at = wlr_output_layout_output_at(view->server->output_layout, view->server->seat->cursor->x,
 						 view->server->seat->cursor->y);
 		if (!at) {

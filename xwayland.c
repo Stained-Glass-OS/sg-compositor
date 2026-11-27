@@ -13,6 +13,7 @@
 #include <wlr/types/wlr_scene.h>
 #include <wlr/util/log.h>
 #include <wlr/xwayland.h>
+#include <xcb/xcb.h>
 
 #include "decor.h"
 #include "elevated.h"
@@ -69,6 +70,36 @@ xwayland_view_x_box(struct cg_view *view, struct wlr_box *box)
 	}
 	*box = (struct wlr_box){xs->x, xs->y, xs->width, xs->height};
 	return true;
+}
+
+/* where the window it is transient for (its owner: WM_TRANSIENT_FOR) is on
+ * the screen now, asked of X: Wine may have put the owner into a frame of its
+ * own (sg_embed), so the compositor's idea of it is old */
+bool
+xwayland_view_parent_box(struct cg_view *view, struct wlr_box *box)
+{
+	struct wlr_xwayland_surface *xs = xwayland_view_from_view(view)->xwayland_surface;
+	xcb_connection_t *c;
+	xcb_get_geometry_reply_t *g;
+	xcb_translate_coordinates_reply_t *t;
+	bool ok = false;
+
+	if (!xs || !xs->parent || xs->override_redirect || !view->server->xwayland ||
+	    !(c = wlr_xwayland_get_xwm_connection(view->server->xwayland))) {
+		return false;
+	}
+	if (!(g = xcb_get_geometry_reply(c, xcb_get_geometry(c, xs->parent->window_id), NULL))) {
+		return false;
+	}
+	t = xcb_translate_coordinates_reply(c, xcb_translate_coordinates(c, xs->parent->window_id, g->root, 0, 0),
+					    NULL);
+	if (t && g->width > 1 && g->height > 1) {
+		*box = (struct wlr_box){t->dst_x, t->dst_y, g->width, g->height};
+		ok = true;
+	}
+	free(t);
+	free(g);
+	return ok;
 }
 
 static char *

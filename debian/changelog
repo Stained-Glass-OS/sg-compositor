@@ -1,3 +1,21 @@
+sg-compositor (0.2.0+sg85) unstable; urgency=medium
+
+  * Windows on the right display with a display LEFT of the main one
+    (GitHub #17, #19): a Linux program's dialog (WM_TRANSIENT_FOR:
+    FileZilla's "Remember passwords?") opens centred over the window it
+    belongs to, whole on that window's display, as Windows puts an owned
+    window -- it was centred on the display under the pointer (and, framed
+    by Wine, then off the screen); the owner's place is asked of X, as Wine
+    may have framed it. A native Wayland window's first place is the
+    display under the pointer, where it was started from -- it was the
+    display under its middle at 0,0, the left one. Gate test-dialogpos (QA
+    VM only; SG_PREBUILT for a VM without a compiler): sg84 2 FAIL, fixed
+    2 PASS, mutants SG_MUTANT_WLAPP_ORIGIN_DISPLAY and
+    SG_MUTANT_DIALOG_POINTER_DISPLAY one FAIL each. test/wlapp-client.c
+    prints the display its surface enters.
+
+ -- Stained Glass OS <ke7oxh@gmail.com>  Fri, 27 Nov 2026 10:05:45 -0800
+
 sg-compositor (0.2.0+sg84) unstable; urgency=medium
 
   * Elevated programs no longer reach the lock (i0635): -E CGROUPS names

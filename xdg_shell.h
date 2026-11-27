@@ -30,6 +30,7 @@ struct cg_xdg_shell_view {
 	struct wlr_box windowed;              /* where it was before full screen */
 	int last_w, last_h;                   /* the size last placed */
 	int gx, gy;                           /* its geometry's offset when placed */
+	bool placed;                          /* placed once: on its display since */
 };
 
 struct cg_xdg_decoration {

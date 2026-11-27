@@ -527,6 +527,25 @@ wayland_app_place(struct cg_view *view)
 	struct cg_xdg_shell_view *xv = xv_of(view);
 	struct wlr_box work, layout, geom = geometry(view);
 
+	/* the first time: on the display under the pointer (where it was
+	 * started from, as Windows opens a program on the display of the
+	 * taskbar or Start it was started from), not the one under its middle
+	 * at 0,0 -- a display left of the main one (GitHub #17) */
+#ifndef SG_MUTANT_WLAPP_ORIGIN_DISPLAY
+	if (!xv->placed && !view->user_placed) {
+		struct wlr_output *at = wlr_output_layout_output_at(view->server->output_layout,
+			view->server->seat->cursor->x, view->server->seat->cursor->y);
+		struct wlr_box b;
+		if (at) {
+			wlr_output_layout_get_box(view->server->output_layout, at, &b);
+			if (!wlr_box_empty(&b)) {
+				view->lx = b.x + b.width / 2 - geom.width / 2 - geom.x;
+				view->ly = b.y + b.height / 2 - geom.height / 2 - geom.y;
+			}
+		}
+	}
+	xv->placed = true;
+#endif
 	work_area(view, &work);
 	if (xv->want_fullscreen) {
 		xv->want_fullscreen = false;

@@ -239,6 +239,20 @@ p_axis(void *d, struct wl_pointer *p, uint32_t t, uint32_t axis, wl_fixed_t v)
 {
 	(void) d, (void) p, (void) t, (void) axis, (void) v;
 }
+/* the display it is shown on (dialogpos-gate.sh) */
+static void
+s_enter(void *d, struct wl_surface *s, struct wl_output *o)
+{
+	for (int i = 0; i < output_count; i++) {
+		if (outputs[i] == o) {
+			printf("enter %s\n", output_names[i] ? output_names[i] : "?");
+			fflush(stdout);
+		}
+	}
+}
+static void s_leave(void *d, struct wl_surface *s, struct wl_output *o) {}
+static const struct wl_surface_listener surface_listener = {s_enter, s_leave};
+
 static const struct wl_pointer_listener pointer_listener = {p_enter, p_leave, p_motion, p_button, p_axis};
 
 static struct wl_pointer *pointer;
@@ -312,6 +326,7 @@ main(int argc, char **argv)
 		wl_seat_add_listener(seat, &seat_listener, NULL);
 	}
 	surface = wl_compositor_create_surface(compositor);
+	wl_surface_add_listener(surface, &surface_listener, NULL);
 	struct xdg_surface *xs = xdg_wm_base_get_xdg_surface(wm_base, surface);
 	xdg_surface_add_listener(xs, &xdg_surface_listener, NULL);
 	toplevel = xdg_surface_get_toplevel(xs);
